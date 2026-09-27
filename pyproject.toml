@@ -1,0 +1,170 @@
+[project]
+name = "harmony"
+version = "1.0.0"
+description = "Гармония — a calm social network: posts, comments and direct messages."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Harmony" }]
+keywords = ["social-network", "flask", "postgresql", "celery", "websocket"]
+
+[project.urls]
+Documentation = "https://harmony.example.com/api/docs"
+Repository = "https://github.com/your-org/harmony"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["backend"]
+exclude = [
+    ".venv",
+    "backend/migrations",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # bugbear
+    "UP",   # pyupgrade
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "RUF",  # ruff-specific
+    "S",    # bandit security rules
+    "BLE",  # blind except
+    "A",    # builtins shadowing
+    "DTZ",  # naive datetimes
+    "T20",  # print
+    "PTH",  # pathlib
+]
+ignore = [
+    # --- Rules this project deliberately does not enforce ----------------------
+    # Each entry is a decision, not an oversight; the rationale is here so a
+    # future reader does not "fix" it and re-break something.
+    #
+    # `ruff format` owns layout. It cannot wrap a long string literal, so a
+    # 190-character Russian error message is not a formatting defect - breaking
+    # it across lines would only make the user-facing text harder to read and
+    # to diff.
+    "E501",
+    # pathlib over os.path. The upload, maintenance and export code works with
+    # paths that come from outside the process, and `os.path` spells the
+    # containment checks (`os.path.abspath` + `startswith`) more directly.
+    "PTH100", "PTH101", "PTH103", "PTH107", "PTH109", "PTH112", "PTH113",
+    "PTH118", "PTH120", "PTH123", "PTH204", "PTH208",
+    # Blanket `except Exception` is the documented posture for *infrastructure*
+    # boundaries - Redis, Celery, the cache, the mailer. A rate limiter or a
+    # cache read that raises turns a degraded feature into a 500, which is
+    # strictly worse than the feature being briefly unavailable. Every such site
+    # carries a comment saying which failure it is absorbing.
+    "BLE001",
+    "S110",    # try/except/pass: the suppression *is* the behaviour
+    "S112",
+    # `enum.StrEnum` would change `str(Member)` from "Member.NAME" to "value".
+    # The mixin form keeps the models' `==` against plain strings unambiguous
+    # and behaves identically on every supported interpreter.
+    "UP042",
+    # if/else is more readable than a ternary when the branches are statements.
+    "SIM108",
+    "SIM110",
+    # --- Rules that need a better fix, tracked separately ----------------------
+    "A003",     # class attribute shadows a builtin
+    "B008",     # function call in a default argument (FastAPI-style deps)
+    "SIM105",   # contextlib.suppress is slower than try/except pass here
+    "RUF001",   # ambiguous unicode in strings: the UI is Russian, on purpose
+    "RUF002",
+    "RUF003",
+    "S101",     # assert: used in service-level invariants
+    "T201",     # print: the CLI commands print by design
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/app/cli.py" = ["T201", "S603", "S607"]
+"backend/tests/*" = ["S101", "S105", "S106", "S311", "T201", "DTZ"]
+"tools/*" = ["T201", "S311"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
+
+# ---------------------------------------------------------------------------
+# Mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+no_strict_optional = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+disallow_untyped_defs = false
+plugins = []
+
+[[tool.mypy.overrides]]
+module = ["flask_socketio.*", "engineio.*", "socketio.*", "bleach.*", "PIL.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["app"]
+omit = [
+    "app/cli.py",
+    "app/wsgi.py",
+    "app/celery_worker.py",
+    "*/migrations/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+    "if __name__ == .__main__.:",
+]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+python_files = ["test_*.py"]
+addopts = "-ra --strict-markers --strict-config"
+markers = [
+    "slow: marks tests as slow",
+    "integration: requires PostgreSQL or Redis",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:flask_socketio.*",
+    "ignore::DeprecationWarning:engineio.*",
+    "ignore::DeprecationWarning:socketio.*",
+    "ignore::UserWarning:flask_sqlalchemy.*",
+]

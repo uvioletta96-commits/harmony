@@ -1,0 +1,28 @@
+# ---------------------------------------------------------------------------
+# Prometheus scrape configuration.
+# ---------------------------------------------------------------------------
+# The API is scraped by service name. Metrics are internal-only: nginx refuses
+# to serve /metrics from a public address, so a scraped target list does not
+# become an information leak.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    stack: harmony
+
+scrape_configs:
+  - job_name: harmony-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8000"]
+        labels:
+          service: api
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]

@@ -1,0 +1,959 @@
+/* ==========================================================================
+   Harmony — application shell, navigation and layout
+   ========================================================================== */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* --------------------------------------------------------------------------
+   Top bar
+   -------------------------------------------------------------------------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--topbar-height);
+  padding: 0 var(--space-4);
+  background: rgba(250, 249, 247, 0.86);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text);
+  flex-shrink: 0;
+}
+.brand:hover { color: var(--text); }
+.brand svg { width: 26px; height: 26px; }
+.brand-word {
+  font-size: var(--text-md);
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+}
+.brand-word em {
+  font-style: normal;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.topbar-search {
+  flex: 1;
+  max-width: 340px;
+  margin: 0 auto;
+}
+.topbar-search .input {
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: var(--bg-sunken);
+  border-color: transparent;
+  padding-left: var(--space-4);
+}
+.topbar-search .input:focus {
+  background: var(--bg-raised);
+  border-color: var(--accent);
+}
+.topbar-search .search-icon {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 15px;
+  height: 15px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.search-wrap { position: relative; }
+.search-wrap .input { padding-left: 36px; }
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+.icon-btn .icon { width: 19px; height: 19px; }
+.icon-btn .badge-count {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+/* --------------------------------------------------------------------------
+   Main layout: three columns on desktop, one on mobile
+   -------------------------------------------------------------------------- */
+
+.layout {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr) var(--sidebar-width);
+  gap: var(--space-6);
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-8);
+  align-items: start;
+  flex: 1;
+}
+
+/* 700px for reading, 860px for forms: a settings label and its input need
+   room side by side, and 700px did not have it. */
+/* Set by `core/router.js` for a page that returned `{ wide: true }`. The
+   content column absorbs the rail's and the rail goes away; see applyWidth()
+   for why it is hidden rather than pushed out. */
+.layout.is-wide { grid-template-columns: var(--sidebar-width) minmax(0, 1fr); }
+.layout.is-wide .layout-right { display: none; }
+
+.layout-center { max-width: 700px; }
+.layout-wide { max-width: 860px; }
+.layout-narrow { max-width: 680px; }
+
+.layout-left,
+.layout-right {
+  position: sticky;
+  top: calc(var(--topbar-height) + var(--space-5));
+}
+
+.layout-left { grid-column: 1; }
+.layout-main { grid-column: 2; min-width: 0; }
+.layout-right { grid-column: 3; }
+
+/* --------------------------------------------------------------------------
+   Sidebar navigation
+   -------------------------------------------------------------------------- */
+
+.side-nav { display: flex; flex-direction: column; gap: 2px; }
+
+.side-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  color: var(--text-secondary);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+.side-link:hover { background: var(--bg-hover); color: var(--text); }
+.side-link[aria-current="page"] {
+  background: var(--bg-active);
+  color: var(--text);
+  font-weight: 500;
+}
+.side-link .icon { width: 20px; height: 20px; flex-shrink: 0; }
+.side-link .side-badge { margin-left: auto; }
+
+.side-section {
+  padding: var(--space-4) var(--space-3) var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+}
+
+.side-card {
+  margin-top: var(--space-5);
+  padding: var(--space-4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+}
+.side-card-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.side-user {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.side-user:hover { background: var(--bg-hover); }
+
+/* --------------------------------------------------------------------------
+   Feed column
+   -------------------------------------------------------------------------- */
+
+.feed { background: var(--bg-raised); border-radius: var(--radius-lg); border: 1px solid var(--border-soft); overflow: hidden; }
+
+.feed-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+  /* The title and the tab strip compete for one row. The tabs are the part that
+     grows - there are four of them - so they are the part that gives way: the
+     strip scrolls on its own axis and the title keeps the space it needs. A
+     title broken across two lines by a tab strip reads as a layout fault. */
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.feed-head > .segmented {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.feed-head > .segmented::-webkit-scrollbar { display: none; }
+.feed-head > .segmented > * { flex: 0 0 auto; }
+.feed-title {
+  font-size: var(--text-lg);
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.feed-tabs {
+  display: flex;
+  gap: var(--space-1);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+}
+.feed-tabs .tab { padding: var(--space-3) var(--space-2); font-size: var(--text-sm); }
+
+/* --------------------------------------------------------------------------
+   Right rail
+   -------------------------------------------------------------------------- */
+
+.rail { display: flex; flex-direction: column; gap: var(--space-4); }
+
+.rail-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.rail-head {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-soft);
+}
+.rail-body { padding: var(--space-3) var(--space-4); }
+
+.rail-link {
+  display: block;
+  padding: var(--space-2) 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+.rail-link + .rail-link { border-top: 1px solid var(--border-soft); }
+.rail-link:hover { color: var(--accent-text); }
+
+.rail-person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+}
+.rail-person + .rail-person { border-top: 1px solid var(--border-soft); }
+.rail-person .name { font-size: var(--text-sm); font-weight: 500; color: var(--text); }
+.rail-person .meta { font-size: var(--text-xs); color: var(--text-muted); }
+
+.tag-cloud { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 4px var(--space-3);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+.tag:hover { background: var(--bg-active); color: var(--text); }
+.tag .count { font-size: var(--text-xs); color: var(--text-faint); }
+
+.rail-footer {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  line-height: var(--leading-relaxed);
+}
+.rail-footer a { color: var(--text-muted); }
+.rail-footer a:hover { color: var(--text-secondary); }
+
+/* --------------------------------------------------------------------------
+   Profile
+   -------------------------------------------------------------------------- */
+
+.profile-header {
+  padding: var(--space-6) var(--space-5) var(--space-5);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.profile-top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.profile-identity { flex: 1; min-width: 0; }
+.profile-name {
+  font-size: var(--text-xl);
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+  line-height: 1.25;
+  /* A display name is one unbroken token as often as not, and a handle always
+     is. Without this the line breaks wherever it happens to run out, so
+     "vis0440668" arrives as "vis0440" over "668" - which reads as two words
+     rather than one long one. `anywhere` rather than `break-word` because the
+     element is a flex item's child and needs to be allowed to break anywhere,
+     not only at a hyphen or space it does not have. */
+  overflow-wrap: anywhere;
+}
+.profile-handle {
+  font-size: var(--text-base);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.profile-bio {
+  font-size: var(--text-base);
+  line-height: var(--leading-relaxed);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  margin-top: var(--space-3);
+  max-width: 60ch;
+}
+.profile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.profile-meta span { display: inline-flex; align-items: center; gap: var(--space-1); }
+.profile-meta .icon { width: 15px; height: 15px; }
+.profile-meta a { color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.profile-meta a:hover { color: var(--text-secondary); border-color: var(--stone-500); }
+
+.profile-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
+
+.profile-stats {
+  display: flex;
+  gap: var(--space-5);
+  padding: var(--space-3) 0;
+}
+.profile-stat { display: flex; align-items: baseline; gap: var(--space-1); }
+.profile-stat .value {
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.profile-stat .label { font-size: var(--text-sm); color: var(--text-muted); }
+.profile-stat:hover .label { color: var(--text-secondary); text-decoration: underline; }
+
+.cover {
+  height: 132px;
+  background: linear-gradient(135deg, var(--sand-200), var(--dusk-100));
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* --------------------------------------------------------------------------
+   Post detail
+   -------------------------------------------------------------------------- */
+
+.post-detail {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.post-detail .post { border-bottom: 1px solid var(--border-soft); }
+.post-detail .post-text { font-size: var(--text-lg); line-height: 1.6; }
+
+.comments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5) var(--space-2);
+}
+.comments-title { font-size: var(--text-base); font-weight: 500; }
+
+/* --------------------------------------------------------------------------
+   Auth pages
+   -------------------------------------------------------------------------- */
+
+.auth-page {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  /* The height of what is left *below the topbar*, not of the viewport. The auth
+     pages render inside the shell, so a full 100dvh here started 60px too low
+     and pushed the submit button - the last thing on the form - off the bottom
+     of the screen. */
+  min-height: calc(100vh - var(--topbar-height));
+  min-height: calc(100dvh - var(--topbar-height));
+}
+
+.auth-aside {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-5);
+  padding: var(--space-9) var(--space-8);
+  background: linear-gradient(160deg, var(--sand-100), var(--dusk-50) 60%, var(--sand-100));
+  border-right: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+.auth-aside::after {
+  content: "";
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  right: -180px;
+  bottom: -220px;
+  background: radial-gradient(circle, rgba(180, 172, 158, 0.18), transparent 68%);
+  pointer-events: none;
+}
+.auth-aside-mark { width: 56px; height: 56px; }
+.auth-aside-title {
+  font-size: var(--text-3xl);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  max-width: 15ch;
+}
+.auth-aside-text {
+  font-size: var(--text-md);
+  line-height: var(--leading-relaxed);
+  color: var(--text-secondary);
+  max-width: 44ch;
+}
+.auth-aside-points { display: flex; flex-direction: column; gap: var(--space-3); }
+.auth-aside-point {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  line-height: var(--leading-snug);
+}
+/* The label is a flex item, so its automatic minimum size is its min-content
+   width and the text refuses to wrap - which in the column the auth page used
+   to get meant every promise overflowed its own row by ~25px and ran under the
+   next one. */
+.auth-aside-point > span { min-width: 0; overflow-wrap: anywhere; }
+.auth-aside-point .icon { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; margin-top: 2px; }
+
+.auth-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+  overflow-y: auto;
+}
+.auth-form {
+  width: 100%;
+  max-width: 380px;
+}
+.auth-form-head { margin-bottom: var(--space-6); }
+.auth-form-title {
+  font-size: var(--text-2xl);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  margin-bottom: var(--space-2);
+}
+.auth-form-sub { font-size: var(--text-base); color: var(--text-muted); line-height: var(--leading-snug); }
+.auth-form-foot {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-align: center;
+}
+.auth-links { display: flex; gap: var(--space-3); justify-content: center; margin-top: var(--space-4); }
+
+/* The confirmation link handed over when the server cannot send mail. Centred
+   and given room, because on a local instance this button is the only way into
+   the account and it should not read as a footnote. */
+.auth-dev-link {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  text-align: center;
+}
+.auth-dev-link .btn { text-decoration: none; }
+
+.auth-brand-mobile { display: none; margin-bottom: var(--space-5); }
+
+/* --------------------------------------------------------------------------
+   Search
+   -------------------------------------------------------------------------- */
+
+.search-head {
+  padding: var(--space-5) var(--space-5) var(--space-4);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-soft);
+}
+.search-input-wrap { position: relative; }
+.search-input-wrap .input { height: 44px; padding-left: 42px; font-size: var(--text-md); }
+.search-input-wrap .icon {
+  position: absolute;
+  left: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.person-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+.person-card:last-child { border-bottom: none; }
+.person-card:hover { background: var(--bg-hover); }
+.person-card .info { flex: 1; min-width: 0; }
+.person-card .name {
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.person-card .handle { font-size: var(--text-sm); color: var(--text-muted); }
+.person-card .bio {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: var(--leading-snug);
+}
+
+/* --------------------------------------------------------------------------
+   Settings
+   -------------------------------------------------------------------------- */
+
+.settings-layout {
+  display: grid;
+  /* A 220px rail inside the page's 700px column left roughly 450px for every
+     field, so labels wrapped mid-word and inputs sat shoulder to shoulder. The
+     settings page needs more room than a feed does, and it is the one page
+     where cramped labels make a control ambiguous. */
+  grid-template-columns: 208px minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+/* A single column below tablet width, where a 208px rail would leave the
+   content too narrow to use. */
+@media (max-width: 767px) {
+  .settings-layout { grid-template-columns: minmax(0, 1fr); }
+  .settings-nav { flex-direction: row; flex-wrap: wrap; }
+}
+.settings-nav { position: sticky; top: calc(var(--topbar-height) + var(--space-5)); }
+.settings-nav a {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.settings-nav a:hover { background: var(--bg-hover); color: var(--text); }
+.settings-nav a[aria-current="page"] { background: var(--bg-active); color: var(--text); font-weight: 500; }
+
+.setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-row .setting-text { flex: 1; min-width: 0; }
+.setting-row .setting-label { font-size: var(--text-base); color: var(--text); margin-bottom: 2px; }
+.setting-row .setting-hint { font-size: var(--text-sm); color: var(--text-muted); line-height: var(--leading-snug); }
+.setting-row .setting-control { flex-shrink: 0; padding-top: 2px; }
+
+.danger-zone { border-color: var(--danger-border); }
+.danger-zone .panel-header { border-color: var(--danger-border); }
+.danger-zone .panel-header .panel-title { color: var(--danger); }
+
+/* --------------------------------------------------------------------------
+   Admin
+   -------------------------------------------------------------------------- */
+
+.admin-metric {
+  padding: var(--space-4);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+}
+.admin-metric .value {
+  font-size: var(--text-2xl);
+  font-weight: 500;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.admin-metric .label { font-size: var(--text-sm); color: var(--text-muted); margin-top: var(--space-1); }
+.admin-metric.is-alert { border-color: var(--danger-border); background: var(--danger-soft); }
+.admin-metric.is-alert .value { color: var(--danger); }
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.reason-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.report-item {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-soft);
+}
+.report-item:last-child { border-bottom: none; }
+.report-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-2);
+}
+.report-content {
+  padding: var(--space-3);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--border-strong);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+/* --------------------------------------------------------------------------
+   Legal pages
+   -------------------------------------------------------------------------- */
+
+.legal-wrap { max-width: 760px; margin: 0 auto; padding: var(--space-6) var(--space-4) var(--space-9); }
+.legal-head { padding: var(--space-4) 0 var(--space-3); border-bottom: 1px solid var(--border-soft); margin-bottom: var(--space-5); }
+.legal-title { font-size: var(--text-2xl); font-weight: 500; letter-spacing: -0.015em; margin-bottom: var(--space-1); }
+.legal-meta { font-size: var(--text-sm); color: var(--text-muted); }
+.legal-body { font-size: var(--text-base); line-height: var(--leading-relaxed); color: var(--text-secondary); }
+.legal-body h2 {
+  font-size: var(--text-lg);
+  font-weight: 500;
+  color: var(--text);
+  margin: var(--space-6) 0 var(--space-2);
+}
+.legal-body h3 { font-size: var(--text-md); font-weight: 500; color: var(--text); margin: var(--space-4) 0 var(--space-1); }
+.legal-body p { margin-bottom: var(--space-3); }
+.legal-body ul, .legal-body ol { padding-left: var(--space-5); margin-bottom: var(--space-3); list-style: revert; }
+.legal-body li { margin-bottom: var(--space-1); }
+.legal-body table { margin: var(--space-3) 0; font-size: var(--text-sm); width: 100%; }
+/* Added by `wrapWideTables` in pages/legal.js. Focusable so the scroll region
+   can be reached by keyboard, and focus-visible only - a permanently outlined
+   scroller would draw a box around every table on the page. */
+.table-scroll { max-width: 100%; overflow-x: auto; }
+.table-scroll:focus { outline: none; }
+.table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+.legal-body td, .legal-body th { overflow-wrap: anywhere; }
+.legal-body th, .legal-body td { text-align: left; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+.legal-body th { font-weight: 500; color: var(--text); background: var(--bg-sunken); }
+.legal-body code { background: var(--bg-sunken); padding: 1px 5px; border-radius: var(--radius-xs); font-size: 0.9em; }
+.legal-body .callout {
+  background: var(--bg-sunken);
+  border-left: 3px solid var(--accent-border);
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  margin: var(--space-4) 0;
+}
+.legal-body .callout p:last-child { margin-bottom: 0; }
+
+/* --------------------------------------------------------------------------
+   Landing page
+   -------------------------------------------------------------------------- */
+
+.landing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: var(--space-9) var(--space-4) var(--space-8);
+  gap: var(--space-5);
+}
+.landing-mark { width: 64px; height: 64px; }
+.landing-title {
+  font-size: var(--text-3xl);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  max-width: 18ch;
+}
+.landing-text {
+  font-size: var(--text-md);
+  line-height: var(--leading-relaxed);
+  color: var(--text-secondary);
+  max-width: 52ch;
+}
+.landing-cta { display: flex; gap: var(--space-3); flex-wrap: wrap; justify-content: center; }
+.landing-stats {
+  display: flex;
+  gap: var(--space-7);
+  padding-top: var(--space-5);
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.landing-stat .value {
+  font-size: var(--text-xl);
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.landing-stat .label { font-size: var(--text-sm); color: var(--text-muted); }
+
+/* --------------------------------------------------------------------------
+   Responsive: collapse to a single column with a bottom nav
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1023px) {
+  .layout {
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+    max-width: 820px;
+  }
+  .layout-right { display: none; }
+}
+
+@media (max-width: 767px) {
+  :root { --topbar-height: 56px; }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--space-3) 0 0;
+    gap: 0;
+    max-width: 100%;
+  }
+  .layout-left { display: none; }
+  .layout-main { grid-column: 1; }
+
+  .feed,
+  .post-detail,
+  .panel,
+  .profile-header {
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+  }
+
+  .topbar-search { max-width: none; }
+  .brand-word { display: none; }
+  .post { padding: var(--space-3) var(--space-4); }
+  .composer { padding: var(--space-3) var(--space-4); }
+  .composer-toolbar { padding-left: 0; }
+  .attach-grid { padding-left: 0; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
+  .comment { padding: var(--space-3) var(--space-4); }
+  .comment[data-depth="1"] { padding-left: var(--space-7); }
+  .comment[data-depth="2"] { padding-left: var(--space-9); }
+  .comment[data-depth="3"] { padding-left: var(--space-11); }
+  .card-pad, .panel-body { padding: var(--space-4); }
+  .tabs { padding: 0 var(--space-3); }
+
+  .toast-region {
+    top: auto;
+    bottom: calc(var(--mobile-nav-height) + var(--space-3));
+    left: var(--space-3);
+    right: var(--space-3);
+    max-width: none;
+  }
+
+  .chat-layout { grid-template-columns: 1fr; height: calc(100dvh - var(--topbar-height) - var(--mobile-nav-height)); }
+  .chat-list { border-right: none; }
+  .chat-list[hidden] + .chat-thread, .chat-thread[hidden] { display: none; }
+  .bubble { max-width: 84%; }
+
+  .settings-layout { grid-template-columns: 1fr; gap: var(--space-4); }
+  .settings-nav {
+    position: static;
+    display: flex;
+    gap: var(--space-1);
+    overflow-x: auto;
+    padding-bottom: var(--space-2);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .settings-nav a { white-space: nowrap; }
+
+  .profile-top { flex-wrap: wrap; }
+  .profile-actions { width: 100%; }
+  .profile-actions .btn { flex: 1; }
+}
+
+@media (max-width: 900px) {
+  .auth-page { grid-template-columns: 1fr; }
+  .auth-aside { display: none; }
+  .auth-brand-mobile { display: flex; }
+}
+
+/* --------------------------------------------------------------------------
+   Bottom mobile navigation
+   -------------------------------------------------------------------------- */
+
+.mobile-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: var(--z-sticky);
+  height: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: rgba(250, 249, 247, 0.94);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-top: 1px solid var(--border-soft);
+}
+
+@media (max-width: 767px) {
+  .mobile-nav { display: flex; }
+  .app { padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom)); }
+}
+
+.mobile-nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  height: var(--mobile-nav-height);
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.mobile-nav-link {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 56px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-wide);
+  transition: color var(--duration-fast) var(--ease-out);
+}
+.mobile-nav-link .icon { width: 21px; height: 21px; }
+.mobile-nav-link[aria-current="page"] { color: var(--text); }
+.mobile-nav-link .badge-count {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
+/* Floating compose button (mobile) */
+.fab {
+  position: fixed;
+  right: var(--space-4);
+  bottom: calc(var(--mobile-nav-height) + var(--space-4) + env(safe-area-inset-bottom));
+  z-index: var(--z-sticky);
+  width: 52px;
+  height: 52px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--ink-900);
+  color: var(--text-inverse);
+  box-shadow: var(--shadow-lg);
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+.fab:active { transform: scale(0.94); }
+.fab .icon { width: 22px; height: 22px; }
+
+@media (max-width: 767px) {
+  .fab { display: flex; }
+}
+
+/* --------------------------------------------------------------------------
+   Print — strip chrome so a profile or post can be printed cleanly
+   -------------------------------------------------------------------------- */
+
+@media print {
+  .topbar, .mobile-nav, .layout-left, .layout-right, .composer,
+  .post-actions, .toast-region, .fab, .side-card { display: none !important; }
+  .layout { display: block; max-width: 100%; padding: 0; }
+  .feed, .post-detail, .card { border: none; box-shadow: none; }
+  body { background: #fff; }
+  a { color: inherit; text-decoration: none; }
+  a[href^="http"]::after { content: " (" attr(href) ")"; font-size: 0.85em; color: #666; }
+}

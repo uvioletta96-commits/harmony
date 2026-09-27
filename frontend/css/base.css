@@ -1,0 +1,389 @@
+/* ==========================================================================
+   Harmony — design tokens, reset and base typography
+   --------------------------------------------------------------------------
+   The whole visual language is defined here as custom properties, so the
+   palette can be retuned in one place and every component inherits it.
+
+   Palette rationale: a warm neutral base (sand/stone) with a single desaturated
+   blue-grey accent. Nothing is fully saturated, nothing is pure black, and
+   contrast is carried by weight and spacing rather than by colour. That is what
+   keeps the interface calm rather than loud.
+   ========================================================================== */
+
+:root {
+  /* --- Neutrals: warm greys ------------------------------------------------ */
+  --sand-50:  #faf9f7;
+  --sand-100: #f5f3f0;
+  --sand-200: #ece9e4;
+  --sand-300: #e0dcd5;
+  --sand-400: #d2ccc2;
+  --stone-500: #a8a196;
+  --stone-600: #8d8479;
+  --stone-700: #6f6862;
+  --ink-800:   #4a4640;
+  --ink-900:   #2c2a27;
+  --ink-950:   #1a1917;
+
+  /* --- Accent: muted blue ------------------------------------------------- */
+  --dusk-50:  #f2f5f6;
+  --dusk-100: #e3e9ec;
+  --dusk-200: #c9d4da;
+  --dusk-300: #a7b8c1;
+  --dusk-400: #7d95a1;
+  --dusk-500: #647d8a;
+  --dusk-600: #4f6470;
+  --dusk-700: #3f515b;
+
+  /* --- Semantic ----------------------------------------------------------- */
+  --bg:            var(--sand-50);
+  --bg-raised:     #ffffff;
+  --bg-sunken:     var(--sand-100);
+  --bg-hover:      var(--sand-100);
+  --bg-active:     var(--sand-200);
+
+  --text:          var(--ink-900);
+  --text-secondary:var(--ink-800);
+  /* Darker than the stone-600/500 they used to alias. Those measured 3.67:1 and
+     2.55:1 against white, and WCAG AA wants 4.5:1 for body text - at 12-13px the
+     character count is unreachable. These two are the same warm greys a step
+     down: 5.2:1 and 5.5:1 on white, 4.7:1 and 5.0:1 on the sunken background.
+     The raw --stone-500/600 tokens are untouched, so decorative uses of them
+     keep the lighter value they were chosen for. */
+  --text-muted:    #736c65;
+  --text-faint:    #6f6862;
+  --text-inverse:  #ffffff;
+
+  --border:        var(--sand-300);
+  --border-soft:   var(--sand-200);
+  --border-strong: var(--sand-400);
+
+  --accent:        var(--dusk-500);
+  --accent-hover:  var(--dusk-600);
+  --accent-soft:   var(--dusk-50);
+  --accent-border: var(--dusk-200);
+  --accent-text:   var(--dusk-700);
+
+  --success:       #5c7f6b;
+  --success-soft:  #eef3ef;
+  --warning:       #9a7b4f;
+  --warning-soft:  #f7f2e9;
+  --danger:        #9a5f57;
+  --danger-soft:   #f8efed;
+  --danger-border: #e3cfcb;
+
+  /* --- Avatar palette (deterministic per user) ---------------------------- */
+  --avatar-sand:  #e3d8c8;
+  --avatar-stone: #dcd8d2;
+  --avatar-sage:  #d3dcd2;
+  --avatar-clay:  #e6d4cc;
+  --avatar-dusk:  #d2dbdf;
+  --avatar-linen: #e8e3d8;
+  --avatar-moss:  #d4dcc9;
+  --avatar-ash:   #dbd9d6;
+
+  /* --- Typography --------------------------------------------------------- */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  --font-display: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, monospace;
+
+  /* A restrained scale. The 1.200 ratio keeps steps distinguishable without
+     the dramatic jumps that make an interface feel loud. */
+  --text-xs:   0.75rem;    /* 12px */
+  --text-sm:   0.8125rem;  /* 13px */
+  --text-base: 0.9375rem;  /* 15px */
+  --text-md:   1rem;       /* 16px */
+  --text-lg:   1.2rem;     /* 19.2px */
+  --text-xl:   1.44rem;    /* 23px */
+  --text-2xl:  1.728rem;   /* 27.6px */
+  --text-3xl:  2.074rem;   /* 33px */
+
+  --leading-tight:  1.25;
+  --leading-snug:   1.4;
+  --leading-normal: 1.6;
+  --leading-relaxed:1.75;
+
+  --tracking-tight: -0.014em;
+  --tracking-normal: 0;
+  --tracking-wide:  0.02em;
+  --tracking-wider: 0.06em;
+
+  /* --- Spacing: 4px base grid --------------------------------------------- */
+  --space-0:  0;
+  --space-1:  0.25rem;  /*  4px */
+  --space-2:  0.5rem;   /*  8px */
+  --space-3:  0.75rem;  /* 12px */
+  --space-4:  1rem;     /* 16px */
+  --space-5:  1.5rem;   /* 24px */
+  --space-6:  2rem;     /* 32px */
+  --space-7:  3rem;     /* 48px */
+  --space-8:  4rem;     /* 64px */
+  --space-9:  6rem;     /* 96px */
+
+  /* --- Radii: soft, never sharp ------------------------------------------ */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+
+  /* --- Shadows: barely there --------------------------------------------- */
+  --shadow-xs: 0 1px 2px rgba(44, 42, 39, 0.04);
+  --shadow-sm: 0 1px 3px rgba(44, 42, 39, 0.05), 0 1px 2px rgba(44, 42, 39, 0.03);
+  --shadow-md: 0 4px 12px rgba(44, 42, 39, 0.06), 0 1px 3px rgba(44, 42, 39, 0.04);
+  --shadow-lg: 0 12px 32px rgba(44, 42, 39, 0.09), 0 2px 8px rgba(44, 42, 39, 0.04);
+  --shadow-focus: 0 0 0 3px var(--dusk-100);
+
+  /* --- Motion: slow enough to feel calm, quick enough to feel alive ------- */
+  --duration-instant: 90ms;
+  --duration-fast:    150ms;
+  --duration-base:    220ms;
+  --duration-slow:    340ms;
+  --ease-out:  cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  /* --- Layout ------------------------------------------------------------- */
+  --content-width: 620px;     /* feed column */
+  --sidebar-width: 264px;
+  --topbar-height: 60px;
+  --mobile-nav-height: 60px;
+  --z-sticky: 20;
+  --z-dropdown: 40;
+  --z-overlay: 60;
+  --z-modal: 80;
+  --z-toast: 100;
+}
+
+/* Respect the OS-level reduced-motion setting. Animations are decorative here,
+   so removing them costs nothing functionally. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ==========================================================================
+   Reset
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  /* Anchored sections clear the sticky topbar instead of hiding under it. */
+  scroll-padding-top: calc(var(--topbar-height) + var(--space-4));
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  font-weight: 400;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern", "liga", "calt";
+  overflow-wrap: break-word;
+}
+
+img,
+picture,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+ul, ol {
+  padding: 0;
+  list-style: none;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-size: inherit;
+  font-weight: 500;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--border-soft);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+code, kbd, pre, samp {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+::selection {
+  background: var(--dusk-100);
+  color: var(--ink-900);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Only remove the default focus ring where a custom one is provided. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ==========================================================================
+   Scrollbars — thin and unobtrusive
+   ========================================================================== */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sand-400) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--sand-400);
+  border: 3px solid transparent;
+  border-radius: var(--radius-full);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--stone-500);
+  background-clip: content-box;
+}
+
+/* ==========================================================================
+   Utilities
+   ========================================================================== */
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: var(--z-toast);
+  padding: var(--space-2) var(--space-4);
+  background: var(--ink-900);
+  color: var(--text-inverse);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  transform: translateY(-200%);
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+  color: var(--text-inverse);
+}
+
+.stack > * + * { margin-top: var(--flow, var(--space-4)); }
+.stack-sm { --flow: var(--space-2); }
+.stack-md { --flow: var(--space-4); }
+.stack-lg { --flow: var(--space-6); }
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+.text-muted  { color: var(--text-muted); }
+.text-secondary { color: var(--text-secondary); }
+.text-sm     { font-size: var(--text-sm); }
+.text-xs     { font-size: var(--text-xs); }
+.text-center { text-align: center; }
+
+.hidden { display: none !important; }
+
+@media (min-width: 640px)  { .sm-only  { display: none !important; } }
+@media (max-width: 639px)  { .md-hidden { display: none !important; } }

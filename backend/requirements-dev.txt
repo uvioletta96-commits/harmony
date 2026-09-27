@@ -1,0 +1,18 @@
+# Development and CI dependencies.
+-r requirements.txt
+
+# --- Testing -------------------------------------------------------------
+pytest==8.3.*
+pytest-cov==6.0.*
+pytest-mock==3.14.*
+pytest-xdist==3.6.*
+pytest-timeout==2.3.*
+freezegun==1.5.*
+
+# --- Lint & format -------------------------------------------------------
+ruff==0.9.*
+mypy==1.15.*
+types-requests==2.32.*
+
+# --- Types ---------------------------------------------------------------
+types-Pillow==11.1.*

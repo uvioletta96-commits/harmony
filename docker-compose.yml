@@ -1,0 +1,353 @@
+# ---------------------------------------------------------------------------
+# Harmony — full stack
+# ---------------------------------------------------------------------------
+# One command brings up Postgres, Redis, the API, the worker, the beat
+# scheduler, nginx and Prometheus. `docker compose up -d` then `make setup`.
+#
+# Design notes that matter when reading this file:
+#   * The API depends on healthy Postgres and Redis, so it never starts against
+#     a half-initialised database.
+#   * Beat runs as exactly one replica. Two schedulers means every maintenance
+#     job fires twice — duplicate deletions, duplicate mails.
+#   * Migrations are a separate profile (`docker compose run --rm migrate`) so
+#     replicas never race each other applying the same DDL.
+
+name: harmony
+
+x-backend-env: &backend-env
+  APP_ENV: production
+  SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required — run: python -m app.cli generate-secret}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required}
+  TOKEN_PEPPER: ${TOKEN_PEPPER:-}
+  IP_HASH_SALT: ${IP_HASH_SALT:-}
+  SITE_URL: ${SITE_URL:-https://harmony.example.com}
+  DATABASE_URL: postgresql+psycopg://harmony:${DB_PASSWORD:-harmony}@db:5432/harmony
+  REDIS_URL: redis://redis:6379/0
+  CACHE_ENABLED: "true"
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  SOCKETIO_MESSAGE_QUEUE: redis://redis:6379/3
+  CORS_ORIGINS: ${SITE_URL:-https://harmony.example.com}
+  TRUSTED_PROXY_COUNT: "1"
+  FORCE_HTTPS: "true"
+  SECURE_COOKIE: "true"
+  HSTS_MAX_AGE_SECONDS: "31536000"
+  BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+  MODERATION_ENABLED: "true"
+  MODERATION_PROVIDER: ${MODERATION_PROVIDER:-local}
+  MODERATION_API_URL: ${MODERATION_API_URL:-}
+  MODERATION_API_KEY: ${MODERATION_API_KEY:-}
+  MAIL_ENABLED: "true"
+  MAIL_BACKEND: smtp
+  MAIL_SERVER: ${MAIL_SERVER:-smtp.example.com}
+  MAIL_PORT: ${MAIL_PORT:-587}
+  MAIL_USERNAME: ${MAIL_USERNAME:-}
+  MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+  MAIL_FROM: ${MAIL_FROM:-no-reply@harmony.example.com}
+  MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Гармония}
+  UPLOAD_DIR: /app/uploads
+  SERVE_UPLOADS: "false"
+  METRICS_ENABLED: "true"
+  PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+  PRIVACY_CONTROLLER_EMAIL: ${PRIVACY_CONTROLLER_EMAIL:-privacy@example.com}
+  DPO_EMAIL: ${DPO_EMAIL:-dpo@example.com}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+  ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_FORMAT: json
+
+x-backend-build: &backend-build
+  context: .
+  dockerfile: backend/Dockerfile
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  # ------------------------------------------------------------------ Data ---
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: harmony
+      POSTGRES_USER: harmony
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-harmony}
+      # Deterministic collation keeps index ordering identical across hosts.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      # Statement timeouts are a backstop against a pathological query
+      # holding a connection and stalling the pool.
+      - -c
+      - statement_timeout=15000
+      - -c
+      - idle_in_transaction_session_timeout=30000
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - default_transaction_isolation=read committed
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U harmony -d harmony"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+    networks: [harmony]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-512mb}
+      # Cache entries are evictable; the broker and queue keys are not, so
+      # only the volatile classes are actually dropped under pressure.
+      - --maxmemory-policy
+      - volatile-lru
+      - --save
+      - "900 1"
+      - --tcp-keepalive
+      - "60"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *default-logging
+    networks: [harmony]
+
+  # ------------------------------------------------------------------- API ---
+  backend:
+    <<: *backend-build
+    restart: unless-stopped
+    env_file: [.env]
+    environment: *backend-env
+    volumes:
+      - uploads:/app/uploads
+      - exports:/app/exports
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    # Pinned deliberately: the WebSocket-capable gevent worker class does not
+    # scale in-process, so horizontal scaling means more containers, not more
+    # workers. See docs/DEPLOYMENT.md.
+    deploy:
+      replicas: ${BACKEND_REPLICAS:-2}
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          memory: 384M
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    logging: *default-logging
+    networks: [harmony]
+
+  # ---------------------------------------------------------------- Worker ---
+  worker:
+    <<: *backend-build
+    restart: unless-stopped
+    command:
+      - celery
+      - -A
+      - celery_worker.celery_app
+      - worker
+      - --loglevel=INFO
+      - --concurrency=${CELERY_CONCURRENCY:-4}
+      - --max-tasks-per-child=500
+      - --prefetch-multiplier=1
+      - -Q
+      - default,notifications,email,moderation,maintenance
+    env_file: [.env]
+    environment: *backend-env
+    volumes:
+      - uploads:/app/uploads
+      - exports:/app/exports
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A celery_worker.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 45s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
+    logging: *default-logging
+    networks: [harmony]
+
+  # Exactly one scheduler. A second instance would run every periodic task
+  # twice: duplicate verification mails, duplicate erasures.
+  beat:
+    <<: *backend-build
+    restart: unless-stopped
+    command:
+      - celery
+      - -A
+      - celery_worker.celery_app
+      - beat
+      - --loglevel=INFO
+      - --schedule=/tmp/celerybeat-schedule
+    env_file: [.env]
+    environment: *backend-env
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      replicas: 1
+    logging: *default-logging
+    networks: [harmony]
+
+  # ------------------------------------------------------------- Frontend ---
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      # Read-only: the app writes uploads through the API, not through nginx.
+      - uploads:/srv/uploads:ro
+      - certbot_www:/var/www/certbot:ro
+    depends_on:
+      backend: { condition: service_started }
+    logging: *default-logging
+    networks: [harmony]
+
+  # ----------------------------------------------------------- Observability ---
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${METRICS_RETENTION:-15d}
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus:/prometheus
+    profiles: [observability]
+    logging: *default-logging
+    networks: [harmony]
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana:/etc/grafana/provisioning:ro
+      - grafana:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    profiles: [observability]
+    depends_on: [prometheus]
+    logging: *default-logging
+    networks: [harmony]
+
+# ------------------------------------------------------------- Migrations ---
+# Run explicitly, never as part of an API replica:
+#   docker compose run --rm migrate
+  migrate:
+    <<: *backend-build
+    profiles: [tools]
+    command: ["flask", "db", "upgrade"]
+    env_file: [.env]
+    environment: *backend-env
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [harmony]
+
+  # One-off maintenance commands:
+  #   docker compose run --rm cli flask create-admin
+  #   docker compose run --rm cli flask seed-demo
+  cli:
+    <<: *backend-build
+    profiles: [tools]
+    entrypoint: ["flask"]
+    command: ["routes"]
+    env_file: [.env]
+    environment: *backend-env
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [harmony]
+
+  # Nightly logical backup. pg_dump is compressed and rotated; the retention
+  # window is enforced by deleting old files, not by trusting the disk.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: [tools]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        while true; do
+          stamp=$$(date -u +%Y%m%dT%H%M%SZ)
+          echo "Backup starting: $$stamp"
+          PGPASSWORD="$${DB_PASSWORD}" pg_dump -h db -U harmony -d harmony -Fc -f "/backups/harmony-$$stamp.dump"
+          # Keep the most recent N dumps.
+          ls -1t /backups/harmony-*.dump 2>/dev/null | tail -n +$${BACKUP_KEEP:-14} | xargs -r rm -f
+          echo "Backup finished: $$stamp"
+          sleep $$(( $${BACKUP_INTERVAL:-86400} ))
+        done
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:-harmony}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-86400}
+      PGPASSWORD: ${DB_PASSWORD:-harmony}
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [harmony]
+
+networks:
+  harmony:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+  exports:
+  prometheus:
+  grafana:
+  certbot_www:

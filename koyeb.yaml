@@ -1,0 +1,88 @@
+# Koyeb service definition.
+#
+# Koyeb builds this repository with the backend Dockerfile and runs one web
+# service. The defaults here are chosen for what a preview deployment can
+# actually do, and each one is commented with the reason rather than just the
+# value - a number with no reason is something the next person changes blindly.
+#
+# Before the first deploy, these environment variables must be set in the Koyeb
+# dashboard under the service's "Environment" tab. Two of them are not optional:
+#
+#   SECRET_KEY   the session signing key. Generate with
+#                python -c "import secrets; print(secrets.token_urlsafe(48))"
+#                Changing it signs everyone out, so keep it.
+#   APP_ENV      preview, because this deployment has no PostgreSQL and no mail
+#                provider. `production` would refuse to start, correctly.
+
+name: harmony
+runtime: docker
+
+domains:
+  - port: 8000
+    protocol: http
+
+# The preview profile serves the frontend from Flask. A buildpack would be
+# tidier, but the backend Dockerfile already knows how to build the app and
+# adding a second build path means two things that can disagree.
+builder: dockerfile
+dockerfile:
+  path: backend/Dockerfile
+
+# 512 MB is the free tier's ceiling and the application's own working set - the
+# WSGI server, the SQLAlchemy pool, Pillow decoding an upload one at a time.
+# Two workers, because the WebSocket transport holds a thread for as long as the
+# connection is open and one would serialise every conversation behind it.
+instance:
+  cpu: 500m
+  memory: 512M
+  instances: 2
+
+env:
+  - name: APP_ENV
+    value: preview
+  - name: SERVE_FRONTEND
+    value: "1"
+  # The container entrypoint waits 60 s for PostgreSQL and 30 s for Redis and
+  # then exits non-zero. Neither exists on this tier, so without this the deploy
+  # would crash-loop for ninety seconds and fail - a confusing first impression
+  # that looks like a broken image rather than a missing optional service.
+  - name: WAIT_FOR_SERVICES
+    value: "false"
+  # Plain HTTP on the free tier, so the session cookie cannot be marked Secure:
+  # the browser would never send it back and sign-in would be impossible. The
+  # preview profile prints a warning about this on every start.
+  - name: SECURE_COOKIE
+    value: "false"
+  - name: MAIL_ENABLED
+    value: "0"
+  - name: MAIL_BACKEND
+    value: console
+  # No Redis on this tier. The application degrades to in-process counters and
+  # says so in the logs rather than failing.
+  - name: REDIS_URL
+    value: ""
+  - name: SOCKETIO_MESSAGE_QUEUE
+    value: ""
+  # The container filesystem is ephemeral, so SQLite must live in /tmp rather
+  # than beside the code: the rest of the image is read-only in practice and the
+  # application only needs somewhere writable for the duration of the instance.
+  - name: DATABASE_URL
+    value: sqlite:////tmp/harmony.db
+  - name: UPLOAD_DIR
+    value: /tmp/uploads
+  # SECRET_KEY is deliberately absent. It is a secret, and a secret belongs in
+  # the dashboard's secret list, not in a file that goes into a repository.
+
+# The free tier gives a small amount of build time and a short deploy timeout.
+# A first build installs the whole requirements list, so it needs room.
+build:
+  dockerfile: backend/Dockerfile
+
+# Media and the SQLite file live on the container's own filesystem, which is
+# ephemeral: a redeploy or a restart empties them. That is the single largest
+# limitation of this deployment and it is not fixable at this tier - see
+# docs/PYTHONANYWHERE.md for the same trade-off described in full, and
+# docs/DEPLOYMENT.md for what a real deployment changes.
+#
+# To make uploads survive, set S3_BUCKET and the S3_* variables. The storage
+# keys are identical in both backends, so nothing is migrated.

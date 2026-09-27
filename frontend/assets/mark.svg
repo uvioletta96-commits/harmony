@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Гармония">
+  <title>Гармония</title>
+  <g fill="none" stroke-linecap="round" stroke-width="5.5">
+    <path d="M32 5C44 17 44 35 30 59" stroke="#7d7469"/>
+    <path d="M32 5C20 17 20 35 34 59" stroke="#a89c88"/>
+  </g>
+</svg>

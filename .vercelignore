@@ -1,0 +1,32 @@
+# Everything that must not be uploaded to Vercel.
+#
+# Two reasons for each entry: a serverless build has a size ceiling it will
+# refuse to cross, and several of these would be a mistake to ship - a test
+# database and a directory of other people's uploads are not ours to publish.
+
+# Dependencies and build caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+node_modules/
+
+# Secrets and local state
+.env
+.env.*
+!.env.example
+.vercel/
+
+# Local database and uploaded media: development data, and not ours to ship.
+backend/harmony-dev.db
+backend/harmony-dev.db-journal
+backend/app/static/uploads/
+
+# Tests are not a deployment artefact, and `backend/tests/conftest.py` holding a
+# fixture named `app` is what made Vercel's entrypoint scan ambiguous in the
+# first place.
+backend/tests/
+tools/
+frontend/robots.txt

@@ -1,0 +1,24 @@
+{% import "email/_shell.html" as shell %}
+{% set body %}
+<h1 style="margin:0 0 16px 0;font:500 20px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#2c2a27;">
+  Сброс пароля
+</h1>
+<p style="margin:0 0 20px 0;">
+  {{ user.display_name or user.username }}, мы получили запрос на смену пароля в аккаунте.
+  Если это были вы, нажмите кнопку ниже.
+</p>
+<p style="margin:0 0 24px 0;">
+  <a href="{{ link }}" style="display:inline-block;background:#2c2a27;color:#ffffff;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:500;">
+    Задать новый пароль
+  </a>
+</p>
+<p style="margin:0 0 8px 0;font-size:13px;color:#8d8479;">
+  Ссылка действует один час и может использоваться один раз.
+</p>
+<p style="margin:0;font-size:13px;word-break:break-all;color:#6b6357;">{{ link }}</p>
+<p style="margin:24px 0 0 0;font-size:13px;color:#8d8479;">
+  Если вы не запрашивали смену пароля — ничего не делайте. Ваш пароль останется прежним,
+  и мы настоятельно рекомендуем включить двухфакторную защиту в настройках профиля.
+</p>
+{% endset %}
+{{ shell.shell("Сброс пароля · " ~ app_name, body) }}

@@ -1,0 +1,54 @@
+{
+  "name": "Гармония",
+  "short_name": "Гармония",
+  "description": "Спокойная социальная сеть: публикации, комментарии и личные чаты без лишнего шума.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#faf9f7",
+  "theme_color": "#faf9f7",
+  "lang": "ru",
+  "dir": "ltr",
+  "categories": ["social"],
+  "icons": [
+    {
+      "src": "/assets/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Новая публикация",
+      "short_name": "Написать",
+      "url": "/?compose=1",
+      "icons": [{ "src": "/assets/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Сообщения",
+      "short_name": "Сообщения",
+      "url": "/chat",
+      "icons": [{ "src": "/assets/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "Уведомления",
+      "short_name": "Уведомления",
+      "url": "/notifications",
+      "icons": [{ "src": "/assets/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+    }
+  ]
+}

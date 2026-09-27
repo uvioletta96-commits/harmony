@@ -1,0 +1,16 @@
+# Harmony
+#
+# Private or per-account areas: nothing here belongs in an index, and some of it
+# is a reader's own content rather than the site's.
+User-agent: *
+Disallow: /settings
+Disallow: /admin
+Disallow: /chat
+Disallow: /notifications
+Disallow: /api/
+Disallow: /uploads/
+
+# No Sitemap line: there is no sitemap, and pointing crawlers at a URL that 404s
+# is worse than saying nothing. A reader's own account page opts out of indexing
+# through the "allow_search_engine_indexing" privacy setting, which a crawler
+# cannot see from here.

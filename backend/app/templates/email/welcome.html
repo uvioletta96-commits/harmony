@@ -1,0 +1,25 @@
+{% import "email/_shell.html" as shell %}
+{% set body %}
+<h1 style="margin:0 0 16px 0;font:500 20px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#2c2a27;">
+  Добро пожаловать, {{ user.display_name or user.username }}
+</h1>
+<p style="margin:0 0 16px 0;">
+  {{ app_name }} — спокойное пространство для разговоров без лишнего шума.
+  Здесь ценятся спокойный тон, внимание к деталям и уважение к приватности.
+</p>
+<p style="margin:0 0 8px 0;">Несколько первых шагов:</p>
+<ul style="margin:0 0 24px 0;padding-left:20px;">
+  <li style="margin-bottom:6px;">Заполните профиль и добавьте аватар.</li>
+  <li style="margin-bottom:6px;">Настройте приватность: кто видит ваши публикации и активность.</li>
+  <li style="margin-bottom:6px;">Опубликуйте первую запись.</li>
+</ul>
+<p style="margin:0 0 24px 0;">
+  <a href="{{ site_url }}" style="display:inline-block;background:#2c2a27;color:#ffffff;text-decoration:none;padding:12px 26px;border-radius:999px;font-weight:500;">
+    Открыть {{ app_name }}
+  </a>
+</p>
+<p style="margin:0;font-size:13px;color:#8d8479;">
+  В любой момент можно выгрузить свои данные или удалить аккаунт в настройках профиля.
+</p>
+{% endset %}
+{{ shell.shell("Добро пожаловать в " ~ app_name, body) }}

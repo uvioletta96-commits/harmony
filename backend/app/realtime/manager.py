@@ -1,0 +1,114 @@
+"""WebSocket connection registry and broadcast helpers.
+
+Flask-SocketIO is configured with a Redis message queue, so any gunicorn
+worker can emit to a socket held by another worker. Room naming is
+deterministic (``user:<id>`` and ``conversation:<id>``) precisely so that it
+works across processes; per-process state would silently drop messages under
+horizontal scaling.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from flask_socketio import emit, join_room, leave_room
+
+from ..utils.logging import get_logger, log_event
+from ..utils.metrics import realtime_events_total
+
+logger = get_logger("harmony.realtime")
+
+#: sid -> {"user_id", "username", "rooms"}
+_connections: dict[str, dict[str, Any]] = {}
+
+
+def user_room(user_id: int) -> str:
+    return f"user:{user_id}"
+
+
+def conversation_room(conversation_id: int) -> str:
+    return f"conversation:{conversation_id}"
+
+
+def register(sid: str, user: Any) -> dict[str, set[str]]:
+    """Track a socket and put it in the user's personal room."""
+    _connections[sid] = {"user_id": user.id, "username": user.username, "rooms": {user_room(user.id)}}
+    join_room(user_room(user.id))
+    log_event(logger, "DEBUG", "ws.connected", user_id=user.id, sid=sid[:8])
+    return _connections[sid]
+
+
+def unregister(sid: str) -> None:
+    entry = _connections.pop(sid, None)
+    if entry:
+        log_event(logger, "DEBUG", "ws.disconnected", user_id=entry["user_id"], sid=sid[:8])
+
+
+def add_to_conversation(sid: str, conversation_id: int) -> None:
+    room = conversation_room(conversation_id)
+    entry = _connections.get(sid)
+    if entry is not None:
+        entry["rooms"].add(room)
+    join_room(room)
+
+
+def remove_from_conversation(sid: str, conversation_id: int) -> None:
+    room = conversation_room(conversation_id)
+    entry = _connections.get(sid)
+    if entry is not None:
+        entry["rooms"].discard(room)
+    leave_room(room)
+
+
+def emit_to_user(user_id: int, event: str, payload: Any) -> None:
+    realtime_events_total.labels(event=event).inc()
+    emit(event, payload, to=user_room(user_id))
+
+
+def emit_to_conversation(conversation: Any, event: str, payload: Any, *, exclude_sid: str | None = None) -> None:
+    room = conversation_room(conversation.id if hasattr(conversation, "id") else int(conversation))
+    realtime_events_total.labels(event=event).inc()
+    kwargs: dict[str, Any] = {"to": room}
+    if exclude_sid:
+        kwargs["include_self"] = False
+    emit(event, payload, **kwargs)
+
+
+def emit_global(event: str, payload: Any) -> None:
+    """Broadcast to every connected socket.
+
+    Used only for low-frequency public events (a new post appearing in the
+    global feed). A high-frequency event must never use this path — it would
+    wake every idle connection and turn one busy user into a fleet-wide load.
+    """
+    realtime_events_total.labels(event=event).inc()
+    emit(event, payload)
+
+
+def online_user_ids() -> list[int]:
+    return sorted({entry["user_id"] for entry in _connections.values()})
+
+
+def connection_count() -> int:
+    return len(_connections)
+
+
+def clear_registry() -> None:
+    """Test hook."""
+    _connections.clear()
+
+
+__all__ = [
+    "add_to_conversation",
+    "clear_registry",
+    "connection_count",
+    "conversation_room",
+    "emit_global",
+    "emit_to_conversation",
+    "emit_to_user",
+    "online_user_ids",
+    "register",
+    "remove_from_conversation",
+    "unregister",
+    "user_room",
+]

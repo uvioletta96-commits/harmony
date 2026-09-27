@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Документация API · Гармония</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <style>
+    body { margin: 0; background: #f6f4f1; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .topbar {
+      display: flex; align-items: center; gap: 12px;
+      padding: 16px 24px; background: #fff; border-bottom: 1px solid #e6e1db;
+    }
+    .topbar h1 { font-size: 17px; font-weight: 500; margin: 0; color: #2c2a27; }
+    .topbar .spacer { flex: 1; }
+    .topbar a { color: #6f7d84; font-size: 14px; text-decoration: none; }
+    .topbar a:hover { text-decoration: underline; }
+    .note { padding: 20px 24px; color: #575149; font-size: 14px; max-width: 880px; }
+    .note code { background: #fff; border: 1px solid #e6e1db; border-radius: 4px; padding: 1px 5px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <svg width="26" height="26" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <path d="M32 5 C44 17 44 35 30 59" stroke="#8d8479" stroke-width="4.5" stroke-linecap="round"/>
+      <path d="M32 5 C20 17 20 35 34 59" stroke="#b3a794" stroke-width="4.5" stroke-linecap="round"/>
+    </svg>
+    <h1>Гармония · API {{ api_version }}</h1>
+    <span class="spacer"></span>
+    <a href="/api">Service discovery</a>
+    <a href="/api/{{ api_version }}/openapi.json">OpenAPI (JSON)</a>
+  </div>
+  <p class="note">
+    Интерактивная документация загружает Swagger UI с CDN. Если CDN недоступен во внутреннем контуре,
+    скачайте <code>openapi.json</code> и откройте его локально.
+    Аутентификация — cookie <code>harmony_access</code> (HttpOnly) либо заголовок <code>Authorization: Bearer …</code>;
+    для изменяющих запросов дополнительно передаётся <code>X-CSRF-Token</code>.
+  </p>
+  <div id="swagger"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-standalone-preset.js" crossorigin></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: "/api/{{ api_version }}/openapi.json",
+      dom_id: "#swagger",
+      deepLinking: true,
+      displayRequestDuration: true,
+      defaultModelsExpandDepth: 1,
+      docExpansion: "list",
+      tryItOutEnabled: true,
+      persistAuthorization: true,
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+      layout: "BaseLayout"
+    });
+  </script>
+</body>
+</html>

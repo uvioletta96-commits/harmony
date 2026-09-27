@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Гармония — социальная сеть</title>
+  <meta name="description" content="Гармония — спокойная социальная сеть: публикации, комментарии и личные чаты без лишнего шума.">
+  <meta name="theme-color" content="#faf9f7" media="(prefers-color-scheme: light)">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/css/base.css">
+  <link rel="stylesheet" href="/css/components.css">
+  <link rel="stylesheet" href="/css/layout.css">
+  <link rel="stylesheet" href="/css/pages.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Перейти к содержимому</a>
+
+  <!-- The shell renders its own .app wrapper in here; this is only the mount
+       point the router writes into. -->
+  <div id="app">
+    <noscript>
+      <div style="max-width:640px;margin:80px auto;padding:32px;text-align:center;font-family:system-ui,sans-serif">
+        <h1 style="font-size:24px;font-weight:500;margin:0 0 12px">Гармония</h1>
+        <p style="color:#575149;line-height:1.6">
+          Для работы приложения необходим JavaScript. Включите его в настройках браузера и обновите страницу.
+        </p>
+      </div>
+    </noscript>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

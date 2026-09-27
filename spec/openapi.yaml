@@ -1,0 +1,2306 @@
+openapi: 3.1.0
+info:
+  title: Гармония (Harmony) API
+  version: 1.0.0
+  summary: REST and realtime API for the Harmony social network.
+  description: |
+    # Гармония API
+
+    A social network API. All responses share one envelope so a client has a
+    single code path for success and failure:
+
+    ```json
+    { "ok": true,  "data": { }, "meta": { "count": 15, "has_more": true, "next_cursor": "eyJ..." } }
+    { "ok": false, "error": { "code": "not_found", "message": "Пост не найден.", "request_id": "..." } }
+    ```
+
+    ## Authentication
+
+    After `POST /auth/login` the API issues two cookies:
+
+    | Cookie | HttpOnly | Purpose |
+    |---|---|---|
+    | `harmony_access` | yes | Access token (JWT) |
+    | `harmony_refresh` | yes | Refresh token, scoped to `/api/v1/auth` |
+    | `harmony_csrf` | **no** | CSRF token for the double-submit pattern |
+
+    The access cookie is `HttpOnly` so that an XSS payload cannot read it.
+    The CSRF cookie is deliberately readable, because the client must echo it.
+
+    **Every unsafe method** (`POST`, `PATCH`, `PUT`, `DELETE`) must send the CSRF
+    token in the `X-CSRF-Token` header, matching the cookie. A correct `Origin`
+    or `Referer` is also accepted, which keeps non-browser clients working.
+
+    Non-browser clients may instead send `Authorization: Bearer <access_token>`.
+
+    ## Resources
+
+    Resources are addressed by an opaque 32-character `public_id`, never by the
+    sequential primary key: enumerating ids leaks volume and makes authorisation
+    bugs easier to exploit.
+
+    ## Pagination
+
+    Collection endpoints return a `meta` object with `count`, `has_more` and
+    `next_cursor`. Pass `cursor` back to fetch the next page.
+
+    Cursors are opaque keyset cursors, not offsets: they stay correct when rows
+    are inserted while a user is scrolling, and they never skip or duplicate.
+
+    ## Rate limits
+
+    Responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`. Exceeding a
+    limit returns `429` with `Retry-After`. A sliding-window log is used, so
+    bursting across a window boundary does not buy extra requests.
+
+    ## Error codes
+
+    | Code | Status | Meaning |
+    |---|---|---|
+    | `validation_failed` | 422 | Input rejected; see `error.fields` |
+    | `unauthenticated` | 401 | Missing or expired token |
+    | `token_expired` / `token_stale` | 401 | Re-authenticate |
+    | `email_not_verified` | 403 | Confirm the address first |
+    | `forbidden` / `insufficient_role` | 403 | Not permitted |
+    | `not_found` | 404 | Absent, or hidden from this viewer |
+    | `csrf_token_missing` / `csrf_token_invalid` | 403 | Send `X-CSRF-Token` |
+    | `rate_limited` | 429 | Slow down; see `retry_after` |
+    | `content_blocked` | 451 | Rejected by content policy |
+    | `content_under_review` | 202 | Held for moderator review |
+    | `spam_blocked` | 429 | Anti-spam limit reached |
+    | `internal_error` | 500 | Unexpected; quote `request_id` when reporting |
+
+    A `404` is deliberately also returned for content that exists but is hidden
+    from the requester, so visibility settings do not leak through the API.
+
+  contact:
+    name: Гармония
+    url: https://harmony.example.com
+    email: privacy@harmony.example.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://harmony.example.com/api/v1
+    description: Production
+  - url: http://localhost:8000/api/v1
+    description: Local development
+  - url: http://localhost:5000/api/v1
+    description: Flask development server
+
+tags:
+  - name: Auth
+    description: Registration, sessions, password recovery.
+  - name: Users
+    description: Profiles, relationships, search.
+  - name: Posts
+    description: Feed, publications, reactions.
+  - name: Comments
+    description: Threaded discussion.
+  - name: Uploads
+    description: Image intake and processing.
+  - name: Chat
+    description: Conversations and messages.
+  - name: Notifications
+    description: Inbox.
+  - name: Moderation
+    description: Reporting and community guidelines.
+  - name: Privacy
+    description: Data-subject rights and legal documents.
+  - name: Admin
+    description: Moderator and administrator tools.
+  - name: System
+    description: Health, metrics, discovery.
+
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+
+paths:
+  # ----------------------------------------------------------------- i18n ---
+  /i18n/locales:
+    get:
+      tags: [i18n]
+      summary: List the interface languages
+      description: >
+        Every language offered is translated in full, so there is no per-key
+        coverage to report. `meta.negotiated` is the best match for the request's
+        `Accept-Language`, which the client uses to pick a language before a
+        session exists. `rtl` travels with each locale because the writing
+        direction is a property of the script.
+      security: []
+      responses:
+        "200":
+          description: Language catalogue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { type: boolean, const: true }
+                  data:
+                    type: object
+                    required: [base, default, locales]
+                    properties:
+                      base: { type: string, description: Fallback language for any missing key. }
+                      default: { type: string, description: Language used when the client states no preference. }
+                      locales:
+                        type: array
+                        items:
+                          type: object
+                          required: [code, native, english, rtl]
+                          properties:
+                            code: { type: string, description: BCP 47 primary subtag. }
+                            native: { type: string, description: The language's name in that language. }
+                            english: { type: string, description: The language's name in English. }
+                            rtl: { type: boolean, description: Whether the script reads right to left. }
+                  meta:
+                    type: object
+                    properties:
+                      negotiated: { type: string, description: Best match for `Accept-Language`. }
+                      count: { type: integer }
+                      has_more: { type: boolean }
+                      next_cursor: { type: boolean, nullable: true }
+
+  # ---------------------------------------------------------------- Auth ---
+  /auth/csrf:
+    get:
+      tags: [Auth]
+      summary: Issue a CSRF token
+      description: Sets the `harmony_csrf` cookie and returns the same value.
+      security: []
+      responses:
+        "200":
+          description: Token issued
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+              description: "Sets the `harmony_csrf` cookie."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: true }
+                  data:
+                    type: object
+                    properties:
+                      csrf_token: { type: string }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Create an account
+      description: |
+        Sends a verification email and returns a pending account.
+        Rate limited to 5/hour, 20/day per subject.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, username, password, consent]
+              properties:
+                email: { type: string, format: email }
+                username: { type: string, minLength: 3, maxLength: 32, example: mira }
+                password: { type: string, minLength: 10, format: password }
+                display_name: { type: string, maxLength: 64 }
+                consent:
+                  type: boolean
+                  description: Acceptance of the terms and privacy policy. Required.
+                marketing_consent: { type: boolean, default: false }
+      responses:
+        "201":
+          description: Account created, pending email verification
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "409":
+          description: Email or username already taken
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                duplicateEmail:
+                  value:
+                    ok: false
+                    error:
+                      code: email_taken
+                      message: Этот адрес электронной почты уже зарегистрирован.
+                      fields: { email: Этот адрес электронной почты уже зарегистрирован. }
+        "422":
+          description: Validation failure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/verify-email:
+    post:
+      tags: [Auth]
+      summary: Confirm an email address
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string, description: Single-use token from the email link. }
+      responses:
+        "200":
+          description: Address confirmed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "422":
+          description: Invalid, expired or already-used token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/resend-verification:
+    post:
+      tags: [Auth]
+      summary: Resend the verification email
+      description: Always returns the same response, so it cannot be used to discover which addresses are registered.
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { email: { type: string, format: email } }
+      responses:
+        "200": { description: Accepted (outcome deliberately not disclosed) }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Sign in
+      description: |
+        Accepts a username or an email address as the identifier.
+        Every failure returns the identical message, so the endpoint cannot be
+        used to enumerate accounts. Repeated failures lock the account
+        temporarily.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier, password]
+              properties:
+                identifier: { type: string, example: mira }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Signed in; sets `harmony_access`, `harmony_refresh`, `harmony_csrf`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "401":
+          description: Invalid credentials (identical for unknown user and wrong password)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example:
+                ok: false
+                error: { code: invalid_credentials, message: Неверный логин или пароль. }
+        "403":
+          description: Account unverified, suspended or banned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: Too many attempts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate the session
+      description: |
+        Issues a new access token and rotates the refresh token. Replaying a
+        rotated refresh token revokes **all** sessions for that account, which
+        is the standard response to a suspected token theft.
+      security: []
+      responses:
+        "200":
+          description: Rotated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "401":
+          description: Missing, invalid or revoked refresh token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Sign out
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                all_sessions:
+                  type: boolean
+                  default: false
+                  description: Revoke every session, not just this one.
+      responses:
+        "200":
+          description: Signed out; auth cookies cleared
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ok" }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current session
+      responses:
+        "200":
+          description: The signed-in user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      user: { $ref: "#/components/schemas/User" }
+        "401": { description: Not authenticated }
+
+  /auth/sessions:
+    get:
+      tags: [Auth]
+      summary: List active sessions
+      responses:
+        "200":
+          description: Active sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      sessions:
+                        type: array
+                        items: { $ref: "#/components/schemas/Session" }
+
+  /auth/sessions/{jti}:
+    delete:
+      tags: [Auth]
+      summary: Revoke one session
+      parameters:
+        - name: jti
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Revoked }
+        "404": { description: Session not found }
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password reset
+      description: Always returns the same response regardless of whether the address exists.
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { email: { type: string, format: email } }
+      responses:
+        "200": { description: Accepted }
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Complete a password reset
+      description: The token is single-use and expires after one hour. All sessions are revoked.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, minLength: 10, format: password }
+      responses:
+        "200": { description: Password changed }
+        "422": { description: Invalid or expired token }
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change the password
+      description: Requires the current password. Revokes all sessions, including this one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, format: password }
+                new_password: { type: string, minLength: 10, format: password }
+      responses:
+        "200": { description: Password changed }
+        "401": { description: Current password incorrect }
+
+  /auth/reauthenticate:
+    post:
+      tags: [Auth]
+      summary: Step-up authentication
+      description: |
+        Returns a short-lived token that authorises one sensitive action
+        (such as deleting an account). A hijacked session alone is therefore
+        not enough to destroy an account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties: { password: { type: string, format: password } }
+      responses:
+        "200":
+          description: Step-up token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      reauth_token: { type: string }
+                      expires_in: { type: integer, example: 600 }
+        "401": { description: Password incorrect }
+
+  # --------------------------------------------------------------- Users ---
+  /users/discover:
+    get:
+      tags: [Users]
+      summary: Landing content
+      security: []
+      responses:
+        "200":
+          description: Recent posts and suggested people
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      posts:
+                        type: array
+                        items: { $ref: "#/components/schemas/Post" }
+                      people:
+                        type: array
+                        items: { $ref: "#/components/schemas/User" }
+
+  /users/search:
+    get:
+      tags: [Users]
+      summary: Search for people
+      description: Respects each target's discoverability settings; opt-outs are excluded for everyone.
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2, maxLength: 80 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Matching people
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedUsers" }
+        "422": { description: Query too short }
+
+  /users/suggestions:
+    get:
+      tags: [Users]
+      summary: Suggested accounts
+      responses:
+        "200":
+          description: Suggestions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      users:
+                        type: array
+                        items: { $ref: "#/components/schemas/User" }
+
+  /users/{public_id}:
+    get:
+      tags: [Users]
+      summary: Profile by id
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+      responses:
+        "200":
+          description: Profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileResponse" }
+        "404": { description: Not found, or not visible to the caller }
+
+  /users/by-username/{username}:
+    get:
+      tags: [Users]
+      summary: Profile by username
+      security: []
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileResponse" }
+        "404": { description: Not found, or not visible to the caller }
+
+  /users/{public_id}:
+    patch:
+      tags: [Users]
+      summary: Update the caller's profile
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties: { user: { $ref: "#/components/schemas/User" } }
+        "422": { description: Validation failure }
+
+  /users/{public_id}/posts:
+    get:
+      tags: [Users]
+      summary: Posts by a user
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Posts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedPosts" }
+
+  /users/{public_id}/comments:
+    get:
+      tags: [Users]
+      summary: Comments by a user
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      user: { $ref: "#/components/schemas/User" }
+                      comments:
+                        type: array
+                        items: { $ref: "#/components/schemas/Comment" }
+                    additionalProperties: true
+
+  /users/{public_id}/follow:
+    post:
+      tags: [Users]
+      summary: Follow
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+      responses:
+        "201":
+          description: Following
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      following: { type: boolean, const: true }
+                      followers_count: { type: integer }
+        "409": { description: Already following, or self-follow }
+    delete:
+      tags: [Users]
+      summary: Unfollow
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+      responses:
+        "200":
+          description: Unfollowed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      following: { type: boolean, const: false }
+                      followers_count: { type: integer }
+        "409": { description: Not following }
+
+  /users/{public_id}/followers:
+    get:
+      tags: [Users]
+      summary: Followers
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+        - $ref: "#/components/parameters/Limit"
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Followers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      users:
+                        type: array
+                        items: { $ref: "#/components/schemas/User" }
+
+  /users/{public_id}/following:
+    get:
+      tags: [Users]
+      summary: Accounts followed
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+        - $ref: "#/components/parameters/Limit"
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        "200":
+          description: Accounts followed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      users:
+                        type: array
+                        items: { $ref: "#/components/schemas/User" }
+
+  # --------------------------------------------------------------- Posts ---
+  /feed:
+    get:
+      tags: [Posts]
+      summary: The feed
+      security: []
+      parameters:
+        - name: mode
+          in: query
+          schema:
+            type: string
+            enum: [latest, following]
+            default: latest
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Posts, newest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedPosts" }
+
+  /posts/search:
+    get:
+      tags: [Posts]
+      summary: Search posts
+      description: Full-text on PostgreSQL, with a `LIKE` fallback for other dialects.
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2 }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Matching posts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedPosts" }
+
+  /posts:
+    post:
+      tags: [Posts]
+      summary: Publish a post
+      description: |
+        Text is sanitised and screened before storage. Images are uploaded
+        separately to `/uploads/images` and referenced by `storage_key`; the
+        server looks up the real metadata, so a client cannot attach an
+        arbitrary URL or mislabel a MIME type.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body: { type: string, maxLength: 5000 }
+                visibility:
+                  type: string
+                  enum: [public, followers, private]
+                  default: public
+                media:
+                  type: array
+                  maxItems: 4
+                  items: { $ref: "#/components/schemas/MediaReference" }
+      responses:
+        "201":
+          description: Published
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      post: { $ref: "#/components/schemas/Post" }
+                    additionalProperties: true
+        "202":
+          description: Held for moderator review
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, const: under_review }
+                      message: { type: string }
+        "422": { description: Empty post or validation failure }
+        "429": { description: Post or spam limit reached }
+        "451": { description: Rejected by content policy }
+
+  /posts/{post_id}:
+    get:
+      tags: [Posts]
+      summary: Read a post
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "200":
+          description: Post
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      post: { $ref: "#/components/schemas/Post" }
+                    additionalProperties: true
+        "404": { description: "Not found, or not visible to the caller" }
+    patch:
+      tags: [Posts]
+      summary: Edit a post
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body: { type: string, maxLength: 5000 }
+                visibility: { type: string, enum: [public, followers, private] }
+      responses:
+        "200": { description: Updated }
+        "403": { description: Not the author }
+        "404": { description: Not found }
+    delete:
+      tags: [Posts]
+      summary: Delete a post
+      description: "Soft delete: the row is retained as a tombstone so comments and moderation history stay coherent."
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "204": { description: Deleted }
+        "403": { description: Not the author }
+
+  /posts/{post_id}/restore:
+    post:
+      tags: [Posts]
+      summary: Restore a deleted post
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "200": { description: Restored }
+        "409": { description: Post was not deleted }
+
+  /posts/{post_id}/reactions:
+    post:
+      tags: [Posts]
+      summary: Like or unlike
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type: { type: string, enum: [like, unlike], default: like }
+      responses:
+        "200":
+          description: New state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      liked: { type: boolean }
+                      likes_count: { type: integer }
+    get:
+      tags: [Posts]
+      summary: Who liked a post
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "200":
+          description: Reactions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      reactions:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            type: { type: string }
+                            user: { $ref: "#/components/schemas/User" }
+                            created_at: { type: string, format: date-time }
+
+  /posts/{post_id}/media:
+    post:
+      tags: [Posts]
+      summary: Attach previously uploaded images
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                media:
+                  type: array
+                  items: { $ref: "#/components/schemas/MediaReference" }
+      responses:
+        "201": { description: Attached }
+        "422": { description: Unknown or already-claimed files }
+
+  # ------------------------------------------------------------ Comments ---
+  /posts/{post_id}/comments:
+    get:
+      tags: [Comments]
+      summary: Comments on a post
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+        - name: sort
+          in: query
+          schema: { type: string, enum: [top, newest], default: top }
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Comments, each with a short preview of its replies
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Comment" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "404": { description: Post not found }
+    post:
+      tags: [Comments]
+      summary: Comment on a post
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, maxLength: 2000 }
+                parent_id: { type: string, description: Public id of the comment being replied to. }
+      responses:
+        "201":
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      comment: { $ref: "#/components/schemas/Comment" }
+                    additionalProperties: true
+        "422":
+          description: "Empty, or reply depth exceeded"
+        "451": { description: "Rejected by content policy" }
+
+  /comments/{comment_id}:
+    patch:
+      tags: [Comments]
+      summary: Edit a comment
+      parameters:
+        - $ref: "#/components/parameters/CommentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties: { body: { type: string, maxLength: 2000 } }
+      responses:
+        "200": { description: Updated }
+        "403": { description: Not the author }
+    delete:
+      tags: [Comments]
+      summary: Delete a comment
+      parameters:
+        - $ref: "#/components/parameters/CommentId"
+      responses:
+        "204": { description: Deleted }
+        "403": { description: Not the author }
+
+  /comments/{comment_id}/replies:
+    get:
+      tags: [Comments]
+      summary: Replies to a comment
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/CommentId"
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30 }
+      responses:
+        "200":
+          description: Replies
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Comment" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+
+  # ------------------------------------------------------------- Uploads ---
+  /uploads/images:
+    post:
+      tags: [Uploads]
+      summary: Upload images
+      description: |
+        Accepts `multipart/form-data` or a JSON body with base64. Files are
+        validated by magic number, re-encoded (which drops EXIF and embedded
+        payloads), resized and stored under a server-generated name.
+
+        Returns an unclaimed reference; creating a post claims it. A cleanup
+        task removes uploads that are never claimed, so abandoned uploads
+        cannot fill the disk.
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: JPEG, PNG, WebP or GIF, up to 8 MB.
+                alt_text: { type: string, maxLength: 240 }
+          application/json:
+            schema:
+              type: object
+              properties:
+                data: { type: string, format: byte }
+                filename: { type: string }
+                alt_text: { type: string }
+      responses:
+        "201":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      files:
+                        type: array
+                        items: { $ref: "#/components/schemas/Media" }
+        "413": { description: File too large }
+        "415": { description: Unsupported format }
+        "422": { description: Corrupt image, or a decompression bomb }
+
+  # ---------------------------------------------------------------- Chat ---
+  /conversations:
+    get:
+      tags: [Chat]
+      summary: List conversations
+      responses:
+        "200":
+          description: Conversations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      total_unread: { type: integer }
+                      conversations:
+                        type: array
+                        items: { $ref: "#/components/schemas/Conversation" }
+    post:
+      tags: [Chat]
+      summary: Start or open a direct conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { type: string, description: Public id of the recipient. }
+      responses:
+        "201":
+          description: Conversation ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      created: { type: boolean }
+                      conversation: { $ref: "#/components/schemas/Conversation" }
+        "403":
+          description: Recipient does not accept messages from strangers
+        "409": { description: Recipient unavailable }
+
+  /conversations/{conversation_id}:
+    get:
+      tags: [Chat]
+      summary: Read a conversation
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "200":
+          description: Conversation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      conversation: { $ref: "#/components/schemas/Conversation" }
+                    additionalProperties: true
+        "404": { description: "Not a participant" }
+
+  /conversations/{conversation_id}/messages:
+    get:
+      tags: [Chat]
+      summary: Message history
+      description: Oldest first, so the result renders directly.
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+        - $ref: "#/components/parameters/Cursor"
+        - name: limit
+          in: query
+          schema: { type: integer, default: 40, maximum: 100 }
+      responses:
+        "200":
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Message" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+    post:
+      tags: [Chat]
+      summary: Send a message (REST fallback)
+      description: The WebSocket `message:send` event is preferred; this endpoint exists for clients that cannot hold a socket open.
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties: { body: { type: string, maxLength: 4000 } }
+      responses:
+        "201":
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      message: { $ref: "#/components/schemas/Message" }
+                    additionalProperties: true
+        "429": { description: "Message rate limit" }
+        "451": { description: "Rejected by content policy" }
+
+  /conversations/{conversation_id}/read:
+    post:
+      tags: [Chat]
+      summary: Mark as read
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                up_to_message_id: { type: string }
+      responses:
+        "200": { description: Marked }
+
+  /conversations/{conversation_id}/leave:
+    post:
+      tags: [Chat]
+      summary: Leave a conversation
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "204": { description: Left }
+
+  /messages/{message_id}:
+    delete:
+      tags: [Chat]
+      summary: Delete a message
+      parameters:
+        - name: messageId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+        "403": { description: Not the sender }
+
+  /messages/unread-count:
+    get:
+      tags: [Chat]
+      summary: Total unread messages
+      responses:
+        "200":
+          description: Count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties: { unread: { type: integer } }
+
+  # ------------------------------------------------------- Notifications ---
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: Inbox
+      parameters:
+        - name: unread
+          in: query
+          schema: { type: string, enum: ["1"] }
+        - $ref: "#/components/parameters/Cursor"
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30 }
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Notification" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+
+  /notifications/unread-count:
+    get:
+      tags: [Notifications]
+      summary: Unread count
+      responses:
+        "200":
+          description: Count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties: { unread_count: { type: integer } }
+
+  /notifications/read:
+    post:
+      tags: [Notifications]
+      summary: Mark as read
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: { type: string }
+                all: { type: boolean }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      marked: { type: integer }
+                      unread_count: { type: integer }
+
+  /notifications/{notification_id}:
+    delete:
+      tags: [Notifications]
+      summary: Delete a notification
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Deleted }
+        "404": { description: Not found }
+
+  # ---------------------------------------------------------- Moderation ---
+  /reports:
+    post:
+      tags: [Moderation]
+      summary: Report content
+      description: |
+        One report per (reporter, target) — duplicates are rejected, so the
+        queue cannot be flooded by a single account. The reporter is never
+        told what action was taken or how many others reported the same item.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_type, target_id, reason]
+              properties:
+                target_type: { type: string, enum: [user, post, comment, message] }
+                target_id: { type: string }
+                reason:
+                  type: string
+                  enum: [spam, harassment, hate, violence, sexual_content, self_harm, misinformation, impersonation, copyright, privacy, other]
+                details: { type: string, maxLength: 1000 }
+      responses:
+        "201":
+          description: Report accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      report:
+                        type: object
+                        properties:
+                          id: { type: string }
+                          status: { type: string }
+                          created_at: { type: string, format: date-time }
+        "409": { description: Already reported this item }
+
+  /reports/mine:
+    get:
+      tags: [Moderation]
+      summary: Reports filed by the caller
+      responses:
+        "200":
+          description: Reports
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      reports:
+                        type: array
+                        items: { $ref: "#/components/schemas/Report" }
+
+  /moderation/guidelines:
+    get:
+      tags: [Moderation]
+      summary: Report reasons and current legal documents
+      security: []
+      responses:
+        "200":
+          description: Guidelines
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      reasons: { type: array, items: { type: string } }
+                      targets: { type: array, items: { type: string } }
+                      documents:
+                        type: array
+                        items: { $ref: "#/components/schemas/LegalDocument" }
+
+  # ------------------------------------------------------------- Privacy ---
+  /legal/documents:
+    get:
+      tags: [Privacy]
+      summary: Current legal documents
+      security: []
+      responses:
+        "200": { description: Documents }
+
+  /legal/documents/{slug}:
+    get:
+      tags: [Privacy]
+      summary: One legal document
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string, enum: [terms, privacy] }
+      responses:
+        "200": { description: Document }
+        "404": { description: Not found }
+
+  /legal/cookies:
+    get:
+      tags: [Privacy]
+      summary: Cookie inventory
+      description: Every cookie the platform sets, with its category and flags.
+      security: []
+      responses:
+        "200": { description: Cookies }
+
+  /legal/processing-register:
+    get:
+      tags: [Privacy]
+      summary: Record of processing activities (Art. 30)
+      description: Generated from live configuration, so it cannot drift from the running system.
+      security: []
+      responses:
+        "200": { description: Processing register }
+
+  /me/avatar:
+    post:
+      tags: [Users]
+      summary: Replace your avatar
+      description: >
+        Stores the uploaded image and sets it as the account's avatar. A
+        dedicated endpoint rather than a field on the profile update: the
+        profile schema has no `avatar_url`, so a client cannot point its own
+        avatar at an arbitrary URL and turn every profile page into a request
+        the reader did not consent to. The URL is assembled here from the bytes
+        that were stored.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "201":
+          description: Avatar replaced
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, data]
+                properties:
+                  ok: { type: boolean, const: true }
+                  data:
+                    type: object
+                    required: [user, avatar_url]
+                    properties:
+                      avatar_url: { type: string }
+                      user: { type: object }
+        "401": { description: "Not signed in" }
+        "413": { description: "File too large" }
+        "415": { description: "Unsupported image format" }
+        "422": { description: "No file supplied" }
+
+  /me/privacy:
+    get:
+      tags: [Privacy]
+      summary: Privacy settings
+      responses:
+        "200": { description: Settings }
+    patch:
+      tags: [Privacy]
+      summary: Update privacy settings
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PrivacyUpdate" }
+      responses:
+        "200": { description: Updated }
+
+  /me/privacy/register:
+    get:
+      tags: [Privacy]
+      summary: Processing register (authenticated)
+      responses:
+        "200": { description: Register }
+
+  /me/data:
+    get:
+      tags: [Privacy]
+      summary: Everything held about the caller (Art. 15/20)
+      responses:
+        "200":
+          description: Machine-readable export
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      exported_at: { type: string, format: date-time }
+                      format_version: { type: string }
+                      profile: { type: object, additionalProperties: true }
+                      privacy: { type: object, additionalProperties: true }
+                      posts: { type: array, items: { type: object } }
+                      comments: { type: array, items: { type: object } }
+                      consent_history: { type: array, items: { type: object } }
+
+  /me/data/requests:
+    get:
+      tags: [Privacy]
+      summary: History of data-subject requests
+      responses:
+        "200": { description: Requests }
+
+  /me/data/export:
+    post:
+      tags: [Privacy]
+      summary: Request a downloadable archive
+      responses:
+        "200": { description: Archive ready }
+        "409": { description: A request of this kind is already open }
+
+  /me/data/export/{request_id}:
+    get:
+      tags: [Privacy]
+      summary: Download a generated archive
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: JSON file }
+        "404": { description: Not found }
+        "409": { description: Not ready, or the download window has closed }
+
+  /me/data/restriction:
+    post:
+      tags: [Privacy]
+      summary: Restrict processing (Art. 18)
+      responses:
+        "200": { description: Recorded }
+
+  /me/data/objection:
+    post:
+      tags: [Privacy]
+      summary: Object to processing (Art. 21)
+      responses:
+        "200": { description: Recorded }
+
+  /me/data/consent:
+    post:
+      tags: [Privacy]
+      summary: Withdraw marketing consent
+      responses:
+        "200": { description: Consent withdrawn }
+
+  /me/deletion:
+    get:
+      tags: [Privacy]
+      summary: Deletion status
+      responses:
+        "200": { description: Status }
+    post:
+      tags: [Privacy]
+      summary: Schedule account deletion (Art. 17)
+      description: |
+        Requires a `reauth_token` from `/auth/reauthenticate`, so a hijacked
+        session alone cannot destroy an account. The account becomes unusable
+        immediately; the data is erased when the grace period elapses unless
+        the deletion is cancelled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reauth_token]
+              properties:
+                reauth_token: { type: string }
+                reason: { type: string }
+      responses:
+        "200": { description: Scheduled }
+        "403": { description: Step-up token missing or invalid }
+        "409": { description: Already scheduled }
+
+  /me/deletion/cancel:
+    post:
+      tags: [Privacy]
+      summary: Cancel a scheduled deletion
+      responses:
+        "200": { description: Cancelled }
+        "409": { description: Nothing to cancel }
+
+  # --------------------------------------------------------------- Admin ---
+  /admin/stats:
+    get:
+      tags: [Admin]
+      summary: Moderation dashboard
+      responses:
+        "200": { description: Statistics }
+        "403": { description: Moderator role required }
+
+  /admin/reports:
+    get:
+      tags: [Admin]
+      summary: Review queue
+      description: Each item includes the reported content and the author's history, so no second lookup is needed.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, in_review, resolved, dismissed], default: open }
+        - name: target_type
+          in: query
+          schema: { type: string, enum: [user, post, comment, message] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25 }
+      responses:
+        "200": { description: Queue }
+        "403": { description: Moderator role required }
+
+  /admin/reports/{report_id}/assign:
+    post:
+      tags: [Admin]
+      summary: Claim a report
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+      responses:
+        "200": { description: Assigned }
+        "404": { description: Report not found }
+
+  /admin/reports/{report_id}/resolve:
+    post:
+      tags: [Admin]
+      summary: Apply a decision
+      description: |
+        The single audited write path for enforcement. Every action is recorded
+        in the moderation log with its reason, so a decision can always be
+        explained and appealed.
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [none, warn, hide, remove, restrict, suspend, ban, restore, unban]
+                note: { type: string, maxLength: 2000 }
+                duration_hours: { type: integer, minimum: 1, maximum: 8760 }
+      responses:
+        "200": { description: Decision applied }
+        "409": { description: Already resolved }
+
+  /admin/posts/{post_id}/action:
+    post:
+      tags: [Admin]
+      summary: Moderate a post directly
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action: { type: string, enum: [hide, remove, restore] }
+                note: { type: string }
+      responses:
+        "200": { description: Applied }
+        "422": { description: Action not applicable to posts }
+
+  /admin/comments/{comment_id}/action:
+    post:
+      tags: [Admin]
+      summary: Moderate a comment directly
+      parameters:
+        - $ref: "#/components/parameters/CommentId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action: { type: string, enum: [remove] }
+                note: { type: string }
+      responses:
+        "200": { description: Applied }
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: List users
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, pending, suspended, banned, deletion_pending] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25 }
+      responses:
+        "200": { description: Users }
+        "403": { description: Moderator role required }
+
+  /admin/users/{public_id}/action:
+    post:
+      tags: [Admin]
+      summary: Warn, suspend, ban or reinstate
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [none, warn, restrict, suspend, ban, unban] }
+                reason: { type: string, maxLength: 2000 }
+                duration_hours: { type: integer, minimum: 1, maximum: 8760 }
+      responses:
+        "200": { description: Applied }
+        "403": { description: Not permitted on this account }
+        "422": { description: Self-action or unknown action }
+
+  /admin/users/{public_id}/role:
+    post:
+      tags: [Admin]
+      summary: Change a role (admin only)
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties: { role: { type: string, enum: [member, moderator, admin] } }
+      responses:
+        "200": { description: Updated }
+        "403": { description: Admin only }
+
+  /admin/users/{public_id}/status:
+    post:
+      tags: [Admin]
+      summary: Set account status (admin only)
+      parameters:
+        - $ref: "#/components/parameters/PublicId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties: { status: { type: string, enum: [active, pending, suspended, banned] } }
+      responses:
+        "200": { description: Updated }
+        "403": { description: Admin only }
+
+  /admin/actions:
+    get:
+      tags: [Admin]
+      summary: Moderation action history
+      parameters:
+        - name: subject_id
+          in: query
+          schema: { type: integer }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 25 }
+      responses:
+        "200": { description: Actions }
+
+  /admin/audit:
+    get:
+      tags: [Admin]
+      summary: Audit log
+      parameters:
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        "200": { description: Audit entries }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: harmony_access
+      description: |
+        Access token set by `/auth/login`. Send `X-CSRF-Token` on unsafe methods.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: For non-browser clients. Exempt from CSRF.
+
+  parameters:
+    PublicId:
+      name: publicId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+    PostId:
+      name: postId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+    CommentId:
+      name: commentId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[0-9a-f]{32}$' }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque keyset cursor from `meta.next_cursor`.
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, default: 15, minimum: 1, maximum: 100 }
+
+  schemas:
+    Ok:
+      type: object
+      properties:
+        ok: { type: boolean, const: true }
+        data: { type: object, additionalProperties: true }
+
+    Error:
+      type: object
+      properties:
+        ok: { type: boolean, const: false }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            fields:
+              type: object
+              additionalProperties: { type: string }
+              description: Field-level messages, so a form can highlight every problem at once.
+            request_id: { type: string, description: Correlates with the server log. }
+            retry_after: { type: integer }
+            detail: {}
+
+    PageMeta:
+      type: object
+      properties:
+        count: { type: integer }
+        has_more: { type: boolean }
+        next_cursor: { type: [string, "null"] }
+        total: { type: integer }
+
+    AuthResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        data:
+          type: object
+          properties:
+            user: { $ref: "#/components/schemas/User" }
+            expires_in: { type: integer }
+            csrf_token: { type: string }
+            requires_email_verification: { type: boolean }
+            message: { type: string }
+
+    User:
+      type: object
+      description: |
+        The public projection. Never includes the email unless the target has
+        opted in, nor any moderation state, counter or token.
+      properties:
+        public_id: { type: string }
+        username: { type: string }
+        display_name: { type: [string, "null"] }
+        initials: { type: string }
+        bio: { type: [string, "null"] }
+        avatar_url: { type: [string, "null"] }
+        avatar_color: { type: string }
+        location: { type: [string, "null"] }
+        website: { type: [string, "null"] }
+        pronouns: { type: [string, "null"] }
+        role: { type: string, enum: [member, moderator, admin] }
+        is_verified: { type: boolean, description: Active account with a confirmed email. }
+        posts_count: { type: integer }
+        comments_count: { type: integer }
+        followers_count: { type: integer }
+        following_count: { type: integer }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        email: { type: string, description: Present only if the target enables it. }
+        profile_visibility: { type: string }
+        is_self: { type: boolean }
+
+    ProfileResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        data:
+          type: object
+          properties:
+            user: { $ref: "#/components/schemas/User" }
+            stats:
+              type: object
+              properties:
+                posts_count: { type: integer }
+                comments_count: { type: integer }
+                followers_count: { type: integer }
+                following_count: { type: integer }
+                likes_received: { type: integer }
+                warnings: { type: integer }
+            relationship:
+              type: [object, "null"]
+              properties:
+                is_following: { type: boolean }
+                follows_you: { type: boolean }
+                is_self: { type: boolean }
+
+    UserUpdate:
+      type: object
+      properties:
+        display_name: { type: string, maxLength: 64 }
+        bio: { type: string, maxLength: 600 }
+        location: { type: string, maxLength: 96 }
+        pronouns: { type: string, maxLength: 32 }
+        website: { type: string, format: uri }
+        avatar_url: { type: string, format: uri }
+        avatar_color: { type: string, enum: [sand, stone, sage, clay, dusk, linen, moss, ash] }
+        show_email: { type: boolean }
+        show_last_seen: { type: boolean }
+        allow_messages_from_anyone: { type: boolean }
+        email_notifications: { type: boolean }
+        marketing_consent: { type: boolean }
+
+    PrivacyUpdate:
+      type: object
+      properties:
+        profile_visibility: { type: string, enum: [public, followers, private] }
+        discoverable_by_search: { type: boolean }
+        allow_mentions: { type: boolean }
+        allow_tagging: { type: boolean }
+        show_email: { type: boolean }
+        show_last_seen: { type: boolean }
+        allow_messages_from_anyone: { type: boolean }
+        email_notifications: { type: boolean }
+        marketing_consent: { type: boolean }
+
+    Post:
+      type: object
+      properties:
+        id: { type: string }
+        author: { $ref: "#/components/schemas/User" }
+        body: { type: string, description: Plain text, always. The API never returns HTML. }
+        spans:
+          type: array
+          description: |
+            Typed text segments (link / mention / hashtag / text). Rendering
+            these as DOM nodes keeps user content out of the HTML parser.
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [text, link, mention, hashtag] }
+              text: { type: string }
+              url: { type: string }
+              username: { type: string }
+              tag: { type: string }
+        media:
+          type: array
+          items: { $ref: "#/components/schemas/Media" }
+        visibility: { type: string, enum: [public, followers, private] }
+        status: { type: string, enum: [published, hidden, under_review, removed, archived] }
+        likes_count: { type: integer }
+        comments_count: { type: integer }
+        viewer_has_liked: { type: boolean }
+        is_owner: { type: boolean }
+        can_edit: { type: boolean }
+        can_delete: { type: boolean }
+        can_report: { type: boolean }
+        created_at: { type: string, format: date-time }
+        edited_at: { type: [string, "null"], format: date-time }
+        status_reason: { type: string }
+
+    Media:
+      type: object
+      properties:
+        id: { type: string }
+        url: { type: string }
+        thumbnail_url: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        byte_size: { type: integer }
+        mime_type: { type: string }
+        alt_text: { type: [string, "null"] }
+        storage_key: { type: string }
+
+    MediaReference:
+      type: object
+      required: [storage_key]
+      properties:
+        storage_key:
+          type: string
+          description: Returned by `/uploads/images`. The server resolves the real metadata itself.
+        alt_text: { type: string, maxLength: 240 }
+
+    Comment:
+      type: object
+      properties:
+        id: { type: string }
+        post_id: { type: string }
+        parent_id: { type: [string, "null"] }
+        depth: { type: integer, maximum: 3 }
+        author: { $ref: "#/components/schemas/User" }
+        body: { type: string }
+        status: { type: string }
+        likes_count: { type: integer }
+        replies_count: { type: integer }
+        replies:
+          type: array
+          items: { $ref: "#/components/schemas/Comment" }
+        is_owner: { type: boolean }
+        created_at: { type: string, format: date-time }
+        edited_at: { type: [string, "null"], format: date-time }
+
+    Conversation:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [direct, group] }
+        title: { type: [string, "null"] }
+        participants:
+          type: array
+          items: { $ref: "#/components/schemas/User" }
+        messages_count: { type: integer }
+        last_message_at: { type: [string, "null"], format: date-time }
+        last_message_preview: { type: [string, "null"] }
+        unread_count: { type: integer }
+        last_read_at: { type: [string, "null"], format: date-time }
+        is_muted: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    Message:
+      type: object
+      properties:
+        id: { type: string }
+        conversation_id: { type: string }
+        sender: { $ref: "#/components/schemas/User" }
+        reply_to_id: { type: [string, "null"] }
+        body: { type: string }
+        status: { type: string, enum: [queued, sent, blocked, deleted] }
+        is_deleted: { type: boolean }
+        created_at: { type: string, format: date-time }
+        edited_at: { type: [string, "null"], format: date-time }
+
+    Notification:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [like, comment, reply, follow, message, moderation, warning, system, reminder] }
+        title: { type: string }
+        body: { type: string }
+        url: { type: [string, "null"] }
+        resource_type: { type: [string, "null"] }
+        resource_id: { type: [string, "null"] }
+        is_read: { type: boolean }
+        actor: { $ref: "#/components/schemas/User" }
+        created_at: { type: string, format: date-time }
+
+    Report:
+      type: object
+      properties:
+        id: { type: string }
+        target_type: { type: string, enum: [user, post, comment, message] }
+        target_id: { type: string }
+        reason: { type: string }
+        details: { type: [string, "null"] }
+        severity: { type: string, enum: [info, low, medium, high, critical] }
+        status: { type: string, enum: [open, in_review, resolved, dismissed] }
+        duplicate_count: { type: integer, description: Total reports against the same target. }
+        auto_flagged: { type: boolean, description: Content was hidden automatically pending review. }
+        reporter: { $ref: "#/components/schemas/User" }
+        resolution: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        resolved_at: { type: [string, "null"], format: date-time }
+
+    LegalDocument:
+      type: object
+      properties:
+        slug: { type: string, enum: [terms, privacy] }
+        version: { type: string }
+        title: { type: string }
+        locale: { type: string }
+        effective_from: { type: string, format: date-time }
+        is_current: { type: boolean }
+        content_hash: { type: string, description: SHA-256 of the exact text the user accepted. }
+        content: { type: string }
+
+    Session:
+      type: object
+      properties:
+        jti: { type: string }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: [string, "null"], format: date-time }
+        expires_at: { type: string, format: date-time }
+        user_agent: { type: [string, "null"] }
+        is_current: { type: boolean }
+
+    PaginatedPosts:
+      type: object
+      properties:
+        ok: { type: boolean }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Post" }
+        meta: { $ref: "#/components/schemas/PageMeta" }
+
+    PaginatedUsers:
+      type: object
+      properties:
+        ok: { type: boolean }
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/User" }
+        meta: { $ref: "#/components/schemas/PageMeta" }

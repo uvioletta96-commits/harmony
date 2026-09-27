@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Гармония">
+  <title>Гармония</title>
+  <desc>Две переплетающиеся плавные линии, образующие форму сердца-листа</desc>
+  <g fill="none" stroke-linecap="round" stroke-width="4.5">
+    <path d="M32 5C44 17 44 35 30 59" stroke="#8d8479"/>
+    <path d="M32 5C20 17 20 35 34 59" stroke="#b3a794"/>
+  </g>
+</svg>

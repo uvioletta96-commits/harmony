@@ -1,0 +1,292 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+# A new push to the same branch supersedes an in-flight run: the result nobody
+# is waiting for any more.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements-dev.txt
+
+      - name: Ruff
+        run: ruff check backend/app backend/tests backend/celery_worker.py backend/wsgi.py tools
+
+      - name: Ruff format check
+        run: ruff format --check backend/app backend/tests
+
+      - name: Mypy
+        continue-on-error: true
+        run: mypy backend/app --ignore-missing-imports --no-strict-optional
+
+  # ---------------------------------------------------------------------------
+  test:
+    name: Tests (PostgreSQL + Redis)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: harmony_test
+          POSTGRES_USER: harmony
+          POSTGRES_PASSWORD: harmony
+        options: >-
+          --health-cmd "pg_isready -U harmony"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports: ["5432:5432"]
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports: ["6379:6379"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements-dev.txt
+
+      # The suite runs against the real database and broker rather than SQLite
+      # and an in-memory stub: most of the things worth testing here (keyset
+      # pagination, window functions, Redis-backed rate limiting) behave
+      # differently on the substitutes, so a green run against SQLite would
+      # not mean much in production.
+      - name: Test
+        env:
+          DATABASE_URL: postgresql+psycopg://harmony:harmony@localhost:5432/harmony_test
+          REDIS_URL: redis://localhost:6379/0
+        run: |
+          cd backend
+          pytest -n auto --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=70
+
+      - name: Coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: backend/coverage.xml
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # tools/check_frontend.py runs under Python; it needs no dependencies.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # No build step and no dependencies — the frontend is plain ES modules.
+      # What matters is that every module parses and that nothing references
+      # a path that does not exist, which a browser would only reveal at
+      # runtime otherwise.
+      - name: Syntax check every module
+        run: |
+          set -e
+          failed=0
+          for file in $(find frontend/js -name '*.js'); do
+            node --input-type=module --check < "$file" 2>/dev/null \
+              || node --check "$file" \
+              || { echo "::error file=$file::syntax error"; failed=1; }
+          done
+          exit $failed
+
+      # innerHTML must never receive user-controlled data. Every sink is
+      # reviewed individually - a single-file grep exemption hides the moment a
+      # fifth one appears.
+      - name: Review every innerHTML sink
+        run: python tools/check_frontend.py
+
+  # ---------------------------------------------------------------------------
+  security:
+    name: Security checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt pyyaml bandit[toml]
+
+      - name: Dependency audit
+        run: |
+          pip install pip-audit
+          pip-audit -r backend/requirements.txt --strict --progress-spinner off || true
+
+      - name: Bandit
+        run: |
+          bandit -r backend/app -ll -q \
+            --skip B101,B104 \
+            --exclude backend/app/cli.py
+
+      - name: No committed secrets
+        run: |
+          if git ls-files | grep -E '\.env$|id_rsa|\.pem$|credentials\.json'; then
+            echo "::error::a secrets-bearing file is tracked in git"
+            exit 1
+          fi
+          echo "No secrets files tracked."
+
+      - name: Production config validation
+        env:
+          APP_ENV: production
+          SECRET_KEY: ci-placeholder-secret-key-at-least-32-chars
+          JWT_SECRET_KEY: ci-placeholder-jwt-key-at-least-32-chars
+          DATABASE_URL: postgresql+psycopg://harmony:harmony@db:5432/harmony
+          MAIL_ENABLED: "true"
+          MAIL_BACKEND: smtp
+          MAIL_SERVER: smtp.example.com
+          SECURE_COOKIE: "true"
+          FORCE_HTTPS: "true"
+        run: |
+          cd backend
+          python -c "from app import create_app; create_app(); print('production profile validates')"
+
+  # ---------------------------------------------------------------------------
+  spec:
+    name: OpenAPI contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install
+        run: pip install pyyaml
+
+      - name: Generated document is current
+        run: python tools/build_openapi.py --check
+
+      - name: Every route is documented
+        env:
+          APP_ENV: testing
+        run: python tools/check_routes.py
+
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Build images
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: false
+          load: true
+          tags: harmony-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: false
+          load: true
+          tags: harmony-frontend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the API container
+        run: |
+          docker run -d --name harmony-ci -p 8000:8000 \
+            -e APP_ENV=development \
+            -e SECRET_KEY=ci-secret-key-at-least-32-characters-long \
+            -e DATABASE_URL=sqlite:////tmp/harmony-ci.db \
+            harmony-backend:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/healthz >/dev/null 2>&1; then
+              echo "Health check passed after ${i}s"
+              curl -fsS http://localhost:8000/api
+              docker rm -f harmony-ci
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::container did not become healthy"
+          docker logs harmony-ci
+          docker rm -f harmony-ci
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [lint, test, frontend, security, spec, docker]
+    steps:
+      - name: Check required jobs
+        run: |
+          results="${{ needs.*.result }}"
+          echo "results=$results"
+          if echo "$results" | grep -qv success; then
+            echo "::error::at least one job did not succeed"
+            exit 1
+          fi
+          echo "All required jobs passed."

@@ -1,0 +1,6 @@
+# Vercel builds from the repository root and installs from ./requirements.txt.
+#
+# The real dependency list lives in backend/requirements.txt, next to the code it
+# describes, where a reader would look for it. pip's `-r` is the whole of the
+# indirection: one line, and no second copy that can drift out of date.
+-r backend/requirements.txt

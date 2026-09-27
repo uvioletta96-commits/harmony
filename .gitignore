@@ -1,0 +1,75 @@
+name: Harmony
+
+# ---------------------------------------------------------------------------
+# Backend (Flask / SQLAlchemy)
+# ---------------------------------------------------------------------------
+# Ignores `__pycache__` directories *inside* the backend, not the backend.
+# A bare `backend/` here once ignored the whole application - the container
+# image has no Python in it to build, and the failure shows up as a broken
+# Dockerfile rather than as a missing source tree.
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+backend/.mypy_cache/
+backend/.ruff_cache/
+backend/.env
+backend/.venv/
+backend/instance/
+backend/harmony-dev.db
+backend/uploads/
+backend/exports/
+*.db
+*.sqlite3
+
+# ---------------------------------------------------------------------------
+# Frontend
+# ---------------------------------------------------------------------------
+frontend/node_modules/
+frontend/.vite/
+frontend/.parcel-cache/
+frontend/dist/
+
+# ---------------------------------------------------------------------------
+# Secrets — never commit
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---------------------------------------------------------------------------
+# OS and runtime
+# ---------------------------------------------------------------------------
+*.log
+logs/
+tmp/
+.DS_Store
+Thumbs.db
+*.pid
+
+# ---------------------------------------------------------------------------
+# Generated artefacts (regenerate with: python tools/build_openapi.py)
+# ---------------------------------------------------------------------------
+backend/app/static/openapi.json

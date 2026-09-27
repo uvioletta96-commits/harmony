@@ -1,0 +1,16 @@
+{% import "email/_shell.html" as shell %}
+{% set body %}
+<h1 style="margin:0 0 16px 0;font:500 20px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#2c2a27;">
+  {{ notice_title }}
+</h1>
+<p style="margin:0 0 16px 0;">{{ user.display_name or user.username }}, сообщаем о решении модератора по вашему обращению.</p>
+{% if notice_body %}
+<p style="margin:0 0 20px 0;padding:14px 16px;background:#f6f4f1;border-left:3px solid #b3a794;border-radius:6px;">
+  {{ notice_body }}
+</p>
+{% endif %}
+<p style="margin:0 0 8px 0;">
+  Если вы считаете решение ошибочным, ответьте на это письмо — его рассмотрит старший модератор.
+</p>
+{% endset %}
+{{ shell.shell(notice_title ~ " · " ~ app_name, body) }}

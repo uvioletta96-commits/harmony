@@ -1,0 +1,22 @@
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+# Provisioned so a fresh stack comes up with a working dashboard instead of an
+# empty "add data source" screen.
+apiVersion: 1
+providers:
+  - name: Harmony
+    orgId: 1
+    folder: Harmony
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

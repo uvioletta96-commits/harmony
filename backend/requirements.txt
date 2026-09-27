@@ -1,0 +1,65 @@
+# Harmony backend — runtime dependencies
+# Pinned to compatible-release ranges: patch updates (incl. security fixes)
+# are picked up on rebuild, but a breaking major can never land silently.
+
+# --- Web framework -------------------------------------------------------
+Flask==3.1.*
+Werkzeug==3.1.*
+Jinja2==3.1.*
+
+# --- Database ------------------------------------------------------------
+Flask-SQLAlchemy==3.1.*
+SQLAlchemy==2.0.*
+alembic==1.14.*
+Flask-Migrate==4.1.*
+
+# --- PostgreSQL driver (psycopg 3, binary wheels) ------------------------
+psycopg[binary]==3.2.*
+
+# --- Cache / broker / task queue ----------------------------------------
+redis==5.2.*
+celery[redis]==5.4.*
+
+# --- Auth & crypto -------------------------------------------------------
+bcrypt==4.2.*
+PyJWT==2.10.*
+itsdangerous==2.2.*
+
+# --- Validation & sanitisation ------------------------------------------
+email-validator==2.2.*
+bleach==6.2.*
+
+# --- Images --------------------------------------------------------------
+Pillow==11.1.*
+
+# --- Realtime ------------------------------------------------------------
+Flask-SocketIO==5.5.*
+python-socketio==5.12.*
+python-engineio==4.11.*
+
+# --- HTTP client (remote moderation, CAPTCHA verification) --------------
+requests==2.32.*
+
+# --- Observability -------------------------------------------------------
+prometheus-client==0.21.*
+
+# --- Production server ---------------------------------------------------
+gunicorn==23.0.*
+gevent==24.11.*
+gevent-websocket==0.10.1
+eventlet==0.40.*
+
+# --- Object storage (only for the S3 backend) -----------------------------
+# boto3==1.35.*
+# Deliberately not installed. The default storage backend is a local directory,
+# so an install that never sets S3_BUCKET should not have to carry an HTTP
+# client it never imports. To use a bucket:
+#     pip install "boto3>=1.35,<2"
+# `app/services/storage.py` imports it lazily and fails on the first write with
+# a message saying exactly this, not at import time.
+
+# --- Static files (single-node deployments) ------------------------------
+whitenoise==6.9.*
+
+# --- Configuration -------------------------------------------------------
+python-dotenv==1.0.*

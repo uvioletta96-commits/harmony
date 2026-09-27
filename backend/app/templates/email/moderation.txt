@@ -1,0 +1,7 @@
+{{ notice_title }}
+
+{{ user.display_name or user.username }}, сообщаем о решении модератора.
+
+{{ notice_body }}
+
+Если решение кажется ошибочным, ответьте на это письмо.
