@@ -6,6 +6,12 @@
 Flask==3.1.*
 Werkzeug==3.1.*
 Jinja2==3.1.*
+# Both are imported directly (app/extensions.py, app/cli.py) rather than only
+# arriving as a transitive dependency of Flask. Declaring a package you import
+# is the whole point of the file: on a clean install an undeclared import is an
+# ImportError at startup, not a missing-extra warning.
+Flask-Cors==6.0.*
+click==8.5.*
 
 # --- Database ------------------------------------------------------------
 Flask-SQLAlchemy==3.1.*
