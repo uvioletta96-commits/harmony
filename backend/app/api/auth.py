@@ -87,10 +87,21 @@ def register():
     enforce("auth:register")
     payload = request.get_json(silent=True) or {}
     user, token = auth_service.register(payload)
+    # Whether a message actually left the building. "Check your inbox" is a
+    # promise, and with MAIL_ENABLED off the server cannot keep it - the reader
+    # has no way to tell a slow mail server from one that was never configured,
+    # and a `resend` button in that state can only ever lie too.
+    mail_enabled = bool(current_app.config.get("MAIL_ENABLED"))
     body = {
         "user": _public_session(user),
         "requires_email_verification": True,
-        "message": "Проверьте почту: мы отправили ссылку для подтверждения аккаунта.",
+        "verification_email_sent": mail_enabled,
+        "message": (
+            "Проверьте почту: мы отправили ссылку для подтверждения аккаунта."
+            if mail_enabled
+            else "Аккаунт создан. Этот сервер не отправляет почту, "
+            "поэтому подтвердить адрес должен администратор."
+        ),
     }
     # Development convenience: surface the confirmation link in the response
     # instead of only in the console. Never enabled in production.

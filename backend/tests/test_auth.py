@@ -38,6 +38,48 @@ class TestRegistration:
         # The plaintext password must never be stored anywhere.
         assert DEFAULT_PASSWORD not in user.password_hash
 
+    def test_the_response_admits_when_no_email_was_sent(self, client, app, ctx):
+        """Registration must not promise mail the server cannot send.
+
+        With `MAIL_ENABLED` off, "check your inbox" is a promise the process
+        is structurally unable to keep, and the reader has no way to tell a
+        slow mail server from one that was never configured. The flag lets the
+        next screen say who has to act instead.
+        """
+        app.config["MAIL_ENABLED"] = False
+        data = assert_ok(
+            client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "nomail@harmony.test",
+                    "username": "nomailuser",
+                    "password": DEFAULT_PASSWORD,
+                    "consent": True,
+                },
+            ),
+            status=201,
+        )
+        assert data["verification_email_sent"] is False
+        assert "не отправляет почту" in data["message"]
+        assert "Проверьте почту" not in data["message"]
+
+    def test_the_response_confirms_a_sent_email_when_mail_works(self, client, app, ctx):
+        app.config["MAIL_ENABLED"] = True
+        data = assert_ok(
+            client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": "withmail@harmony.test",
+                    "username": "withmailuser",
+                    "password": DEFAULT_PASSWORD,
+                    "consent": True,
+                },
+            ),
+            status=201,
+        )
+        assert data["verification_email_sent"] is True
+        assert "Проверьте почту" in data["message"]
+
     def test_rejects_duplicate_email_with_field_error(self, client, user):
         error = assert_error(
             client.post(

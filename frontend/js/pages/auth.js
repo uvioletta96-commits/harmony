@@ -258,7 +258,11 @@ export function renderRegister() {
       const pending = result.verification_url
         ? `&pending=${encodeURIComponent(result.verification_url)}`
         : '';
-      router.navigate(`/verify?sent=1${pending}`);
+      // `sent=0` is not the same as "no token yet": it means the server did not
+      // send anything, and the next screen has to say so rather than point at
+      // an inbox that will stay empty.
+      const sent = result.verification_email_sent ? '1' : '0';
+      router.navigate(`/verify?sent=${sent}${pending}`);
     } catch (error) {
       if (error instanceof ApiError && error.fields) {
         applyServerErrors(form, error.fields);
@@ -373,6 +377,10 @@ export function renderVerify() {
   const params = new URLSearchParams(location.search);
   const token = params.get('token') || '';
   const sent = params.get('sent') === '1';
+  // `sent=0` arrives after a registration on a server with no mail delivery.
+  // It has to be told apart from "no token yet", or the screen claims an email
+  // is on its way when nothing was ever sent.
+  const notSent = params.get('sent') === '0';
   // A link the server could not email, handed over on arrival.
   const pending = params.get('pending') || '';
   const status = el('div');
@@ -387,7 +395,9 @@ export function renderVerify() {
         class: 'auth-form-sub',
         text: pending
           ? 'Осталось подтвердить адрес, чтобы войти.'
-          : 'Мы отправили письмо со ссылкой для подтверждения.',
+          : notSent
+            ? 'Письмо не отправлено.'
+            : 'Мы отправили письмо со ссылкой для подтверждения.',
       }),
     ),
     status,
@@ -408,6 +418,20 @@ export function renderVerify() {
         el('p', { class: 'hint', style: { marginTop: 'var(--space-2)' }, text: 'Ссылка одноразовая и действует ограниченное время.' }),
       ),
     );
+  } else if (notSent) {
+    // No mail backend: there is nothing to wait for and nothing to resend. Say
+    // who has to act and what happens meanwhile, so the account is not simply
+    // stuck with no explanation.
+    status.append(
+      alert({
+        variant: 'warning',
+        text: 'Этот сервер не настроен на отправку почты, поэтому письмо с подтверждением не ушло. '
+          + 'Покажите администратору этот адрес — он подтвердит аккаунт вручную.',
+      }),
+      el('p', { class: 'hint', style: { marginTop: 'var(--space-3)' }, text: 'Ваш пароль уже сохранён. Как только адрес подтвердят, вы сможете войти.' }),
+      el('div', { class: 'auth-form-foot' }, el('a', { href: '/login', text: 'Вернуться ко входу' })),
+    );
+    return { node: authPage(form), wide: true };
   } else if (sent) {
     status.append(
       alert({ variant: 'info', text: 'Проверьте почту, включая папку «Спам». Ссылка действует ограниченное время.' }),
