@@ -77,7 +77,9 @@ case "$ws" in
 esac
 
 say "recent errors, if any"
-journalctl -u harmony --no-pager --lines=40 --since '-2min' \
+# -q: the deploy user cannot read the whole journal, and without this the
+# notice about that is the loudest thing in the output.
+journalctl -q -u harmony --no-pager --lines=40 --since '-2min' \
   | grep -iE '"level": "(ERROR|WARNING)"' | tail -10 || echo "  none"
 
 say "free space and memory after"
