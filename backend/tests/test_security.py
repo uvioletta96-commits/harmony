@@ -7,7 +7,14 @@ import io
 import pytest
 
 from app.extensions import db
-from tests.utils import assert_error, assert_ok, make_mp4, make_png
+from tests.utils import (
+    assert_error,
+    assert_ok,
+    make_corrupt_png,
+    make_mp4,
+    make_png,
+    make_truncated_png,
+)
 
 
 class TestXSS:
@@ -247,6 +254,61 @@ class TestUploads:
         )
         assert data["files"][0]["content_hash"]
         assert data["files"][0]["mime_type"] == "image/png"
+
+    def test_a_bad_checksum_is_a_client_error_not_a_crash(self, auth_client):
+        """A damaged file is the caller's mistake, so it gets a 4xx.
+
+        Pillow raises the **builtin** ``SyntaxError`` from its CRC check. The
+        pipeline caught ``OSError`` and ``ValueError``, so the exception
+        escaped to the generic handler: HTTP 500, an "internal error" message,
+        and a traceback in the log for a file the uploader simply broke.
+        """
+        assert_error(
+            auth_client.upload(
+                "/api/v1/uploads/images",
+                {"file": (io.BytesIO(make_corrupt_png()), "broken.png", "image/png")},
+                content_type="multipart/form-data",
+            ),
+            status=422,
+            code="corrupt_image",
+        )
+
+    def test_a_truncated_png_is_a_client_error_not_a_crash(self, auth_client):
+        """The corruption a half-finished upload produces is a 4xx too."""
+        assert_error(
+            auth_client.upload(
+                "/api/v1/uploads/images",
+                {"file": (io.BytesIO(make_truncated_png()), "cut.png", "image/png")},
+                content_type="multipart/form-data",
+            ),
+            status=422,
+            code="corrupt_image",
+        )
+
+    def test_a_failure_while_decoding_is_a_client_error_not_a_crash(self, auth_client, monkeypatch):
+        """The decode step needs the same guard as the structural probe.
+
+        `verify()` only walks the chunk table, so a file can pass it and still
+        fail in `load()`. Asserting that with a fixture would mean crafting a
+        PNG that is structurally valid and undecodable - which is a fragile
+        thing to maintain - so the decoder is made to fail the way Pillow
+        fails, which is the thing actually under test.
+        """
+        from app.services import upload_service
+
+        def explode(data: bytes, mime_type: str):
+            raise SyntaxError("broken PNG file (bad header checksum in b'IDAT')")
+
+        monkeypatch.setattr(upload_service, "_decode_and_normalise", explode)
+        assert_error(
+            auth_client.upload(
+                "/api/v1/uploads/images",
+                {"file": (io.BytesIO(make_png()), "photo.png", "image/png")},
+                content_type="multipart/form-data",
+            ),
+            status=422,
+            code="corrupt_image",
+        )
 
     def test_accepts_valid_mp4(self, auth_client):
         """A real MP4 container is stored as video, not routed to an image decoder."""

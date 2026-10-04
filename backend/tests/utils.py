@@ -72,6 +72,47 @@ def make_png(width: int = 8, height: int = 8, colour: tuple[int, int, int] = (18
     )
 
 
+def make_corrupt_png() -> bytes:
+    """A PNG whose header is valid but whose ``IDAT`` checksum is not.
+
+    This is what a truncated download or a partial write produces, and it is
+    the interesting case: ``IHDR`` parses, so the file gets past identification,
+    and Pillow only reaches the broken checksum once it walks the chunk table -
+    where it raises the **builtin** ``SyntaxError``. That is neither an
+    ``OSError`` nor a ``ValueError``, so a pipeline catching only those answers
+    a damaged file with a 500 and an "internal error" message.
+
+    Corrupting the header checksum instead would raise
+    ``UnidentifiedImageError`` at ``Image.open()``, which the existing handler
+    already covers, and the test would pass against the buggy code.
+    """
+
+    def chunk(tag: bytes, data: bytes, crc: int | None = None) -> bytes:
+        checksum = zlib.crc32(tag + data) & 0xFFFFFFFF if crc is None else crc
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", checksum)
+
+    raw = b""
+    for _ in range(8):
+        raw += b"\x00" + bytes((180, 170, 150)) * 8
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw), crc=0xDEADBEEF)
+        + chunk(b"IEND", b"")
+    )
+
+
+def make_truncated_png() -> bytes:
+    """A valid PNG cut off part-way through ``IDAT``.
+
+    The chunk table never closes, so this fails at identification rather than
+    at the decode step. It is the corruption a half-finished upload actually
+    produces, and it must be a client error too.
+    """
+    full = make_png()
+    return full[: len(full) // 2]
+
+
 def multipart_image(name: str = "photo.png", data: bytes | None = None) -> dict[str, Any]:
     return {"file": (io.BytesIO(data or make_png()), name, "image/png")}
 
@@ -88,7 +129,9 @@ __all__ = [
     "assert_error",
     "assert_ok",
     "create_post",
+    "make_corrupt_png",
     "make_png",
+    "make_truncated_png",
     "multipart_image",
     "response_json",
 ]

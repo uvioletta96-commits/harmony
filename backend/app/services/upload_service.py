@@ -13,6 +13,7 @@ import hashlib
 import io
 import os
 import secrets
+import struct
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +24,21 @@ from ..utils.logging import get_logger, log_event
 from ..utils.responses import PayloadTooLargeError, UnsupportedMediaTypeError, ValidationError
 
 logger = get_logger("harmony.service.uploads")
+
+#: Pillow reports "this is not a usable image" through several unrelated
+#: exceptions. A bad chunk CRC raises the **builtin** ``SyntaxError``; a
+#: truncated file raises ``OSError``; an unrecognised magic number raises
+#: ``UnidentifiedImageError`` (itself an ``OSError`` subclass); a malformed
+#: chunk header raises ``struct.error``. To somebody who uploaded a damaged
+#: file they all mean the same thing, and none of them is a fault in this code,
+#: so none of them may escape as a 500. ``DecompressionBombError`` is handled
+#: separately because it gets its own message.
+IMAGE_PARSE_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    ValueError,
+    SyntaxError,
+    struct.error,
+)
 
 #: Magic-number signatures. Each entry is ``(mime, signature, length)``; the
 #: first ``length`` bytes of the payload are compared after ASCII case-folding.
@@ -211,25 +227,30 @@ def store_image(
         )
 
     try:
-        from PIL import Image, UnidentifiedImageError
+        from PIL import Image
     except ImportError as exc:  # pragma: no cover - Pillow is a declared dependency
         logger.error("Pillow is not installed; image processing is disabled")
         raise ValidationError("Обработка изображений временно недоступна.", code="imaging_unavailable") from exc
 
     try:
-        from PIL import Image
-
         Image.MAX_IMAGE_PIXELS = 80_000_000  # decompression-bomb ceiling
         with Image.open(io.BytesIO(data)) as probe:
             probe.verify()  # structural validation, O(1) for most formats
     except Image.DecompressionBombError as exc:
         raise ValidationError("Изображение слишком большое.", code="decompression_bomb") from exc
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+    except IMAGE_PARSE_ERRORS as exc:
         raise ValidationError("Не удалось прочитать изображение. Файл повреждён?", code="corrupt_image") from exc
 
     content_hash = hashlib.sha256(data).hexdigest()
 
-    image, meta = _decode_and_normalise(data, mime_type)
+    # `verify()` checks structure, not decodability: a file can pass it and
+    # still fail in `load()`, so the decode step needs the same net.
+    try:
+        image, meta = _decode_and_normalise(data, mime_type)
+    except Image.DecompressionBombError as exc:
+        raise ValidationError("Изображение слишком большое.", code="decompression_bomb") from exc
+    except IMAGE_PARSE_ERRORS as exc:
+        raise ValidationError("Не удалось прочитать изображение. Файл повреждён?", code="corrupt_image") from exc
     if image is None:
         raise ValidationError("Не удалось обработать изображение.", code="image_processing_failed")
 
