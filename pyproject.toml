@@ -94,6 +94,11 @@ ignore = [
 "backend/app/cli.py" = ["T201", "S603", "S607"]
 "backend/tests/*" = ["S101", "S105", "S106", "S311", "T201", "DTZ"]
 "tools/*" = ["T201", "S311"]
+# `.env` has to be read before `.config` is imported, because every profile
+# resolves `env("...")` in its class body. That call is deliberately between the
+# imports, so the imports after it are not at the top of the file. Moving them
+# up is the bug this whole change exists to fix.
+"backend/app/__init__.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app", "tests"]

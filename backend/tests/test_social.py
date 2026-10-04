@@ -1308,6 +1308,56 @@ class TestDotenvIsActuallyLoaded:
         monkeypatch.delenv("HARMONY_DOTENV_QUOTED", raising=False)
         monkeypatch.delenv("HARMONY_DOTENV_PLAIN", raising=False)
 
+    def test_a_value_in_the_file_is_visible_to_the_config_classes(self, ctx, tmp_path):
+        """The file must be read before `.config` is imported, not after.
+
+        Every profile resolves `env("...")` in its *class body*, so all values
+        are snapshotted when `app.config` is first imported. A loader called
+        from inside `create_app()` therefore ran too late: the file was parsed
+        into `os.environ` after the classes had already captured an empty
+        environment, and every value in it was ignored. Docker hides this
+        because the values arrive as real environment variables; on a host
+        where the file is the only source, the app refuses to boot.
+
+        `os.environ` cannot be un-set once a class body has run, so this needs
+        a subprocess with nothing inherited but the file.
+        """
+        import os
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / ".env").write_text(
+            "APP_ENV=preview\nHARMONY_ORDERING_PROOF=from-the-file\n", encoding="utf-8"
+        )
+        probe = "import os, app.config; print(os.environ.get('HARMONY_ORDERING_PROOF', 'MISSING'))"
+
+        # Everything except the values under test: the parent's APP_ENV must not
+        # win, and the proof variable must not already be set, or the assertion
+        # would pass for the wrong reason. The rest of the environment is kept
+        # because Windows needs SystemRoot for asyncio to import at all.
+        env = dict(os.environ)
+        env.pop("APP_ENV", None)
+        env.pop("HARMONY_ORDERING_PROOF", None)
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+
+        result = subprocess.run(  # noqa: S603
+            [sys.executable, "-c", probe],
+            cwd=repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "from-the-file" in result.stdout.splitlines()[-1], (
+            "app.config was imported before .env was read: the profile class "
+            f"bodies snapshotted an empty environment. stdout={result.stdout!r}"
+        )
+
 
 class TestPreviewProfile:
     """A way to get a site online before paying for a database and a mail server.

@@ -20,6 +20,15 @@ from typing import Any
 
 from flask import Flask, g, request
 
+# Must precede every other relative import. `.config` evaluates `env("...")` in
+# each profile's class body, so its values are snapshotted when `app.config` is
+# first imported. Reading `.env` after that point loads the file into
+# os.environ too late and every value in it is ignored - which only shows up
+# where the file is the sole source of configuration, i.e. on a real server.
+from .env_loader import load_dotenv_files as _load_dotenv_files
+
+_load_dotenv_files()
+
 from .config import ConfigError, get_config
 from .extensions import celery_app, cors, db, init_redis, migrate, socketio, start_redis_supervisor
 from .utils.logging import configure_logging, get_logger, install_request_context
@@ -30,39 +39,14 @@ logger = get_logger("harmony.app")
 __version__ = "1.0.0"
 
 
-def _load_dotenv_files() -> None:
-    """Read ``.env`` before anything reads the environment.
-
-    Every setting in this application comes from ``os.environ`` through
-    ``config.env()``. ``python-dotenv`` was a dependency and ``.env.example``
-    said "copy to .env and fill in" - but nothing ever loaded the file, so a
-    reader who followed the instructions exactly would fill it in, restart, and
-    watch every value be ignored. Nothing reads a missing file, so this cannot
-    make anything worse, and it has to happen before the config profile is
-    chosen because ``APP_ENV`` in the file decides which profile that is.
-
-    Real environment variables win. A container platform sets them from its own
-    secret store, and a shell export is usually deliberate; the file is the
-    fallback for a developer working locally.
-    """
-    from pathlib import Path
-
-    try:
-        from dotenv import load_dotenv
-    except ImportError:  # pragma: no cover - dependency is declared
-        return
-
-    # The repository root, so the same file is found whether the app is started
-    # from `backend/` (flask --app wsgi) or from the root, and in tests.
-    for candidate in (Path.cwd(), Path(__file__).resolve().parent.parent.parent):
-        path = candidate / ".env"
-        if path.is_file():
-            load_dotenv(path, override=False)
-            return
-
-
 def create_app(config_name: str | None = None, **overrides: Any) -> Flask:
-    """Build and configure a Flask application instance."""
+    """Build and configure a Flask application instance.
+
+    The ``.env`` read is repeated here on purpose. It is idempotent and costs
+    nothing, and it keeps the guarantee that every entry point - ``flask --app``,
+    ``gunicorn wsgi:app``, the test suite - behaves the same even if something
+    cleared the environment after import.
+    """
     _load_dotenv_files()
 
     app = Flask(
