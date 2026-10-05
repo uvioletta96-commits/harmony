@@ -232,7 +232,10 @@ async function languageSection(host, currentUser) {
       : t('Интерфейс будет на языке браузера.');
   });
 
-  body.append(
+  // `host`, not `body`: `body` does not exist in this scope, so the append
+  // raised a ReferenceError *after* `clear(host)` had already emptied the
+  // panel. The section rendered as nothing at all.
+  host.append(
     panel(t('Язык интерфейса'), t('Каждый язык переведён полностью — частично переведённых вариантов здесь нет.'),
       el('div', { class: 'field' },
         el('label', { class: 'label', for: 's-language' }, t('Язык')),

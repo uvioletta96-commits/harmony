@@ -96,8 +96,13 @@ def search_users(
     if viewer is not None:
         query = query.where(User.id != viewer.id)
 
-    total = db.session.scalar(select(func.count()).select_from(query.subquery())) or 0
-    rows = list(query.limit(limit).offset(max(0, offset)).scalars().all())
+    # `query` is a `Select`, not a `Result`. `.scalars()` only exists once the
+    # statement has been executed, so the paging has to go through
+    # `db.session.execute`; calling it on the `Select` raised AttributeError and
+    # every people search on the deployed server answered 500.
+    page_query = query.limit(limit).offset(max(0, offset))
+    total = db.session.scalar(select(func.count()).select_from(page_query.subquery())) or 0
+    rows = list(db.session.execute(page_query).scalars().all())
     items = [row.to_public_dict(viewer) for row in rows]
     return Page(items=items, next_cursor=None, has_more=offset + len(rows) < total, total=total)
 

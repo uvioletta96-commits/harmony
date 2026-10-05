@@ -624,7 +624,19 @@
 .setting-row .setting-text { flex: 1; min-width: 0; }
 .setting-row .setting-label { font-size: var(--text-base); color: var(--text); margin-bottom: 2px; }
 .setting-row .setting-hint { font-size: var(--text-sm); color: var(--text-muted); line-height: var(--leading-snug); }
-.setting-row .setting-control { flex-shrink: 0; padding-top: 2px; }
+/* `flex-shrink: 0` kept the control at its full content width, which is right
+   for a fixed-size button and wrong for anything carrying its own text. Cap it
+   so the label column always has room to breathe. */
+.setting-row .setting-control { flex-shrink: 0; padding-top: 2px; max-width: 100%; }
+
+@media (max-width: 560px) {
+  /* Too narrow to sit label-left / control-right. The label takes its own line
+     and the control follows, right-aligned, instead of the two fighting over
+     the same row. */
+  .setting-row { flex-wrap: wrap; gap: var(--space-3); }
+  .setting-row .setting-text { flex: 1 1 100%; }
+  .setting-row .setting-control { margin-left: auto; }
+}
 
 .danger-zone { border-color: var(--danger-border); }
 .danger-zone .panel-header { border-color: var(--danger-border); }

@@ -320,7 +320,7 @@ function renderAttachment(item) {
   const isVideo = typeof item.mime_type === 'string' && item.mime_type.startsWith('video/');
 
   if (isVideo) {
-    return el('video', {
+    const video = el('video', {
       class: 'post-video',
       src: item.url,
       // No autoplay and no controls-by-default: a feed that starts talking
@@ -332,6 +332,20 @@ function renderAttachment(item) {
       poster: item.thumbnail_url || undefined,
       'aria-label': item.alt_text || 'Видео',
     });
+    // One video at a time. Three overlapping clips from a feed is noise, and on
+    // a phone it is worse than noise: the audio tracks stack and there is no
+    // way to tell which one to mute. Starting one pauses the rest, which is the
+    // behaviour every video feed converges on.
+    video.addEventListener('play', () => {
+      for (const other of document.querySelectorAll('video.playing')) {
+        if (other !== video) other.pause();
+      }
+      video.classList.add('playing');
+    });
+    const stopPlaying = () => video.classList.remove('playing');
+    video.addEventListener('pause', stopPlaying);
+    video.addEventListener('ended', stopPlaying);
+    return video;
   }
 
   const img = el('img', {

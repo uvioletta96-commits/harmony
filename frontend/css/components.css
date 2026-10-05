@@ -337,6 +337,11 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* Without this the text refuses to shrink below its longest word. Inside a
+     flex row whose sibling is `flex-shrink: 0` (`.setting-control`), that
+     handed all the width to the switch and squeezed the label column down to a
+     single character, so the text wrapped one letter per line on a phone. */
+  min-width: 0;
 }
 .switch .switch-label {
   font-size: var(--text-base);
