@@ -690,10 +690,10 @@
 .post-media .post-video:not(:hover):not(:focus-within) { controls: none; }
 .post-media .post-video::cue { font-size: 0.9em; }
 
-/* The browser refused audible autoplay and the clip fell back to muted. The
-   only cue a reader would otherwise get is silence they cannot explain, so the
-   controls stay visible and say what one tap does. */
-.post-media .post-video.is-blocked:not(:hover):not(:focus-within) { controls: show; }
+/* A playing clip keeps its controls visible. Hiding them until hover is fine
+   for a poster, but while the video is running there is nothing to hover to -
+   the reader needs the scrubber and the mute button to be there. */
+.post-media .post-video.playing:not(:hover):not(:focus-within) { controls: show; }
 
 .post-actions {
   display: flex;

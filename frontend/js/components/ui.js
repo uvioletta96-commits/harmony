@@ -323,40 +323,27 @@ function renderAttachment(item) {
     const video = el('video', {
       class: 'post-video',
       src: item.url,
-      // Asked for: sound on, playing by itself.
+      // Sound on, and no autoplay.
       //
-      // Browsers decide whether to allow that. Chrome and Safari block audible
-      // autoplay unless the visitor has interacted with the page or the site
-      // has enough engagement to qualify, and no attribute can override it -
-      // `autoplay` plus `muted: false` is the request, not a guarantee. The
-      // fallback below is what happens when the request is refused, so the
-      // clip still plays and still has sound, one tap away.
-      autoplay: '',
+      // These two requests are in direct conflict, and the conflict is not a
+      // trade-off to balance - it has to be resolved one way or the other.
+      // `autoplay` starts every clip in the feed the moment it is in the
+      // viewport, and the rule below (one clip at a time) then has four videos
+      // each pausing the other three as they all start. Measured on the
+      // deployed server: all four ended up playing with their audio stacked,
+      // which is the exact complaint autoplay was supposed to fix.
+      //
+      // So the clip waits for the reader. `muted: false` is the part that can
+      // be honoured unconditionally - it means sound is on the moment anything
+      // plays, with no unmute step - and a browser that refuses even that will
+      // refuse to start it at all, which is the honest outcome.
       muted: false,
-      loop: '',
       controls: '',
       preload: 'metadata',
       playsinline: '',
       poster: item.thumbnail_url || undefined,
       'aria-label': item.alt_text || 'Видео',
     });
-
-    // If the browser refused audible autoplay, `play()` rejects with
-    // NotAllowedError. Starting muted and marking the clip means the reader
-    // gets the video plus one visible control, instead of a poster that never
-    // moves and no indication why.
-    const startMutedFallback = () => {
-      video.muted = true;
-      video.classList.add('is-blocked');
-      video.play().catch(() => {
-        /* Even muted autoplay can be refused; the controls are already there. */
-      });
-    };
-
-    const attempt = video.play();
-    if (attempt && typeof attempt.catch === 'function') {
-      attempt.catch(startMutedFallback);
-    }
 
     // One video at a time. Three overlapping clips from a feed is noise, and on
     // a phone it is worse than noise: the audio tracks stack and there is no
@@ -371,14 +358,6 @@ function renderAttachment(item) {
     const stopPlaying = () => video.classList.remove('playing');
     video.addEventListener('pause', stopPlaying);
     video.addEventListener('ended', stopPlaying);
-    // A tap anywhere on a blocked clip is the gesture that unlocks sound.
-    video.addEventListener('click', () => {
-      if (video.classList.contains('is-blocked')) {
-        video.muted = false;
-        video.classList.remove('is-blocked');
-        video.play().catch(() => {});
-      }
-    });
     return video;
   }
 
