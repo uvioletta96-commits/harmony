@@ -156,6 +156,26 @@ class TestPeopleDirectory:
         people = search_service.discover(user, limit=10)["people"]
         assert other_user.username in [row["username"] for row in people]
 
+    def test_a_signed_out_visitor_also_sees_people(self, other_user):
+        """Nobody can follow anybody before registering, so the rail cannot be
+        the only route to a profile. A guest gets the public accounts."""
+        people = search_service.discover(None, limit=10)["people"]
+        assert other_user.username in [row["username"] for row in people]
+
+    def test_a_guest_is_not_offered_a_private_profile(self, other_user):
+        other_user.profile_visibility = ProfileVisibility.PRIVATE.value
+        db.session.commit()
+        people = search_service.discover(None, limit=10)["people"]
+        assert other_user.username not in [row["username"] for row in people]
+
+    def test_the_guest_rail_ranks_established_accounts_first(self, make_user):
+        quiet = make_user(username="quietone")
+        loud = make_user(username="loudone")
+        loud.posts_count = 5
+        db.session.commit()
+        people = [row["username"] for row in search_service.discover(None, limit=10)["people"]]
+        assert people.index("loudone") < people.index(quiet.username)
+
     def test_suggestions_include_somebody_to_follow(self, client, user, other_user):
         names = [row["username"] for row in user_service.suggestions_for(user, limit=8)]
         assert other_user.username in names

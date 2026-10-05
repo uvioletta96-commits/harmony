@@ -157,14 +157,45 @@ def search_posts(
     return Page(items=serialise_posts(page.items, viewer), next_cursor=page.next_cursor, has_more=page.has_more)
 
 
-def discover(viewer: User | None, *, limit: int = 10) -> list[dict[str, Any]]:
-    """Default landing content: a light mix of newest posts and active users."""
+def discover(viewer: User | None, *, limit: int = 10) -> dict[str, Any]:
+    """Default landing content: a light mix of newest posts and active users.
+
+    The people list is built for signed-out visitors too. It used to be
+    `suggestions_for(viewer) if viewer else []`, which meant a brand new account
+    landed on "Кого почитать: подпишитесь на кого-нибудь" and could not fill it:
+    the only way to be *offered* to somebody was to already follow them, and the
+    only way to find somebody was search - which is the thing being replaced.
+    Registering has to make you visible, and it has to make the people already
+    here visible to you.
+    """
     from .post_service import get_feed
     from .user_service import suggestions_for
 
     feed = get_feed(viewer, mode="latest", limit=limit)
-    users = suggestions_for(viewer, limit=limit) if viewer else []
-    return {"posts": feed.items, "people": users}
+    if viewer is not None:
+        people = suggestions_for(viewer, limit=limit)
+    else:
+        people = _people_for_guest(limit=limit)
+    return {"posts": feed.items, "people": people}
+
+
+def _people_for_guest(*, limit: int) -> list[dict[str, Any]]:
+    """Public accounts a visitor can browse before registering.
+
+    Ranked by how established they are rather than alphabetically, so the rail
+    is not just whoever joined first.
+    """
+    rows = (
+        db.session.query(User)
+        .filter(
+            User.status == UserStatus.ACTIVE.value,
+            User.profile_visibility == ProfileVisibility.PUBLIC.value,
+        )
+        .order_by(User.posts_count.desc(), User.followers_count.desc(), User.created_at.asc())
+        .limit(limit)
+        .all()
+    )
+    return [row.to_public_dict(None) for row in rows]
 
 
 def trending_tags(limit: int = 8) -> list[dict[str, Any]]:
