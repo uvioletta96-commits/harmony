@@ -23,6 +23,12 @@ backend/exports/
 *.db
 *.sqlite3
 
+# Uploads land under whichever UPLOAD_DIR the run is configured with, and the
+# default is derived from the working directory. A test run from `backend/`
+# therefore produces backend/backend/app/static/uploads/, which `git add -A`
+# will happily commit. Match by name anywhere rather than by exact path.
+**/app/static/uploads/
+
 # ---------------------------------------------------------------------------
 # Frontend
 # ---------------------------------------------------------------------------
