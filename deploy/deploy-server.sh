@@ -50,6 +50,32 @@ say "publish the frontend"
 sudo rm -rf "$WEBROOT"
 sudo mkdir -p "$WEBROOT"
 sudo cp -a "$APP/frontend/." "$WEBROOT/"
+
+# The asset names are not fingerprinted (`/js/main.js`), and the site config
+# marks them `immutable` for a year - which is only correct while the URL
+# changes. Without this stamp a browser that has the app open keeps the
+# previous bundle for a year, so a fixed script never reaches anybody who
+# already visited. Appending the commit id to the entry points turns "one
+# year, and never again" into "one year, and only for this exact content".
+STAMP=$(git -C "$APP" rev-parse --short HEAD)
+"$PY" - "$WEBROOT/index.html" "$STAMP" <<'PYEOF'
+import re
+import sys
+
+index, stamp = sys.argv[1], sys.argv[2]
+with open(index, encoding="utf-8") as handle:
+    html = handle.read()
+
+# Local assets only: the Google Fonts and Socket.IO URLs carry their own
+# versions and are not ours to stamp.
+pattern = r'(?P<head>(?:href|src)=")(?P<path>/(?:js|css)/[^"?]+)(?P<tail>\??[^"]*")'
+html, count = re.subn(pattern, lambda m: f"{m.group('head')}{m.group('path')}?v={stamp}{m.group('tail')}", html)
+
+with open(index, "w", encoding="utf-8") as handle:
+    handle.write(html)
+print(f"  stamped {count} asset URLs with ?v={stamp}")
+PYEOF
+
 sudo chown -R root:root "$WEBROOT"
 sudo find "$WEBROOT" -type d -exec chmod 755 {} +
 sudo find "$WEBROOT" -type f -exec chmod 644 {} +
