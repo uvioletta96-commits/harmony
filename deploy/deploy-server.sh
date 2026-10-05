@@ -47,18 +47,25 @@ say "publish the frontend"
 # nginx serves index.html and the asset tree straight from disk, so a deploy
 # that forgot this step would leave the browser on a stale bundle referencing
 # asset files that no longer exist.
-sudo rm -rf "$WEBROOT"
-sudo mkdir -p "$WEBROOT"
-sudo cp -a "$APP/frontend/." "$WEBROOT/"
-
-# The asset names are not fingerprinted (`/js/main.js`), and the site config
-# marks them `immutable` for a year - which is only correct while the URL
-# changes. Without this stamp a browser that has the app open keeps the
-# previous bundle for a year, so a fixed script never reaches anybody who
-# already visited. Appending the commit id to the entry points turns "one
-# year, and never again" into "one year, and only for this exact content".
+#
+# The assets are published under a directory named for the commit, and
+# index.html points into it. That is what makes a long cache safe here: the URL
+# carries the content, so `immutable` is finally true.
+#
+# The obvious alternative - appending `?v=<commit>` to the entry points - does
+# not work for an unbundled ES module graph. Relative imports resolve against
+# the importer's *path*, not its query string, so `main.js?v=abc` still imports
+# `../components/ui.js` unversioned. Only the entry point gets a fresh URL;
+# every module below it is served from the year-long cache the previous deploy
+# populated, and the visitor keeps running the old build. Verified on this
+# server: `main.js?v=…` was current while `components/ui.js` was still the
+# pre-fix file.
 STAMP=$(git -C "$APP" rev-parse --short HEAD)
-"$PY" - "$WEBROOT/index.html" "$STAMP" <<'PYEOF'
+sudo rm -rf "$WEBROOT"
+sudo mkdir -p "$WEBROOT/$STAMP"
+sudo cp -a "$APP/frontend/." "$WEBROOT/$STAMP/"
+
+"$PY" - "$WEBROOT/$STAMP/index.html" "$STAMP" <<'PYEOF'
 import re
 import sys
 
@@ -66,16 +73,27 @@ index, stamp = sys.argv[1], sys.argv[2]
 with open(index, encoding="utf-8") as handle:
     html = handle.read()
 
-# Local assets only: the Google Fonts and Socket.IO URLs carry their own
-# versions and are not ours to stamp.
-pattern = r'(?P<head>(?:href|src)=")(?P<path>/(?:js|css)/[^"?]+)(?P<tail>\??[^"]*")'
-html, count = re.subn(pattern, lambda m: f"{m.group('head')}{m.group('path')}?v={stamp}{m.group('tail')}", html)
+# Local assets only. The Google Fonts and Socket.IO URLs carry their own
+# versions and are not ours to repoint.
+pattern = r'(?P<head>(?:href|src)=")/(?P<path>(?:js|css|assets)/[^"?]+)(?P<tail>[^"]*")'
+html, count = re.subn(
+    pattern,
+    lambda m: f'{m.group("head")}/{stamp}/{m.group("path")}{m.group("tail")}',
+    html,
+)
 
+# The shell itself is the one file that must never be cached: it is what points
+# at the current asset directory.
 with open(index, "w", encoding="utf-8") as handle:
     handle.write(html)
-print(f"  stamped {count} asset URLs with ?v={stamp}")
+print(f"  pointed {count} asset URLs at /{stamp}/")
 PYEOF
 
+# Keep the two previous builds so a browser mid-load on an old index.html can
+# still fetch what it was told to fetch.
+sudo find "$WEBROOT" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
+
+sudo cp "$WEBROOT/$STAMP/index.html" "$WEBROOT/index.html"
 sudo chown -R root:root "$WEBROOT"
 sudo find "$WEBROOT" -type d -exec chmod 755 {} +
 sudo find "$WEBROOT" -type f -exec chmod 644 {} +
