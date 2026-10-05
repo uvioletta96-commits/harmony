@@ -1,4 +1,4 @@
-"""Comment, moderation, chat and privacy tests.
+﻿"""Comment, moderation, chat and privacy tests.
 
 Convention used throughout this file:
 
@@ -1390,6 +1390,13 @@ class TestPreviewProfile:
             "SECURE_COOKIE": True,
             "MODERATION_PROVIDER": "local",
             "MODERATION_API_KEY": "",
+            # `MAIL_ENABLED=False` is exactly the combination that makes
+            # requiring address confirmation unusable - no confirmation can be
+            # delivered, so nobody who registers could ever sign in. These
+            # tests are about which bucket each *other* problem lands in, so
+            # this one is switched off to keep the subject of the assertion
+            # visible.
+            "REQUIRE_EMAIL_VERIFICATION": False,
         }
         values.update(overrides)
         for key, value in values.items():
@@ -1414,6 +1421,8 @@ class TestPreviewProfile:
             MAIL_ENABLED=True,
             MAIL_BACKEND="smtp",
             MAIL_SERVER="smtp.example.com",
+            # Mail works here, so confirmation can be required again.
+            REQUIRE_EMAIL_VERIFICATION=True,
         )
         assert config.PREVIEW is False
 
@@ -1447,6 +1456,8 @@ class TestPreviewProfile:
                 MAIL_ENABLED=True,
                 MAIL_BACKEND="smtp",
                 MAIL_SERVER="smtp.example.com",
+                # Mail works here, so confirmation can be required again.
+                REQUIRE_EMAIL_VERIFICATION=True,
             )
         assert "SECURE_COOKIE" in str(caught.value)
 
@@ -1461,6 +1472,8 @@ class TestPreviewProfile:
             MAIL_ENABLED=True,
             MAIL_BACKEND="smtp",
             MAIL_SERVER="smtp.example.com",
+            # Mail works here, so confirmation can be required again.
+            REQUIRE_EMAIL_VERIFICATION=True,
         )
         assert config.collect_problems() == ([], [])
 
@@ -1486,6 +1499,10 @@ class TestPreviewProfile:
             MAIL_ENABLED=True,
             MAIL_BACKEND="smtp",
             MAIL_SERVER="smtp.example.com",
+            # "Nothing is wrong" has to mean the confirmation requirement too,
+            # otherwise this test passes only because of the default off in the
+            # shared helper rather than because the deployment is complete.
+            REQUIRE_EMAIL_VERIFICATION=True,
         )
         captured = capsys.readouterr()
         assert "PREVIEW MODE" not in captured.err

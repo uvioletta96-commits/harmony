@@ -323,15 +323,41 @@ function renderAttachment(item) {
     const video = el('video', {
       class: 'post-video',
       src: item.url,
-      // No autoplay and no controls-by-default: a feed that starts talking
-      // the moment it scrolls into view is hostile. Controls appear on hover
-      // via CSS, and the poster keeps the grid from collapsing to a bare box.
+      // Asked for: sound on, playing by itself.
+      //
+      // Browsers decide whether to allow that. Chrome and Safari block audible
+      // autoplay unless the visitor has interacted with the page or the site
+      // has enough engagement to qualify, and no attribute can override it -
+      // `autoplay` plus `muted: false` is the request, not a guarantee. The
+      // fallback below is what happens when the request is refused, so the
+      // clip still plays and still has sound, one tap away.
+      autoplay: '',
+      muted: false,
+      loop: '',
       controls: '',
       preload: 'metadata',
       playsinline: '',
       poster: item.thumbnail_url || undefined,
       'aria-label': item.alt_text || 'Видео',
     });
+
+    // If the browser refused audible autoplay, `play()` rejects with
+    // NotAllowedError. Starting muted and marking the clip means the reader
+    // gets the video plus one visible control, instead of a poster that never
+    // moves and no indication why.
+    const startMutedFallback = () => {
+      video.muted = true;
+      video.classList.add('is-blocked');
+      video.play().catch(() => {
+        /* Even muted autoplay can be refused; the controls are already there. */
+      });
+    };
+
+    const attempt = video.play();
+    if (attempt && typeof attempt.catch === 'function') {
+      attempt.catch(startMutedFallback);
+    }
+
     // One video at a time. Three overlapping clips from a feed is noise, and on
     // a phone it is worse than noise: the audio tracks stack and there is no
     // way to tell which one to mute. Starting one pauses the rest, which is the
@@ -345,6 +371,14 @@ function renderAttachment(item) {
     const stopPlaying = () => video.classList.remove('playing');
     video.addEventListener('pause', stopPlaying);
     video.addEventListener('ended', stopPlaying);
+    // A tap anywhere on a blocked clip is the gesture that unlocks sound.
+    video.addEventListener('click', () => {
+      if (video.classList.contains('is-blocked')) {
+        video.muted = false;
+        video.classList.remove('is-blocked');
+        video.play().catch(() => {});
+      }
+    });
     return video;
   }
 

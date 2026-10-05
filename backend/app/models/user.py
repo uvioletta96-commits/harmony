@@ -250,6 +250,14 @@ class User(SerializerMixin, db.Model, PrimaryKeyMixin, PublicIdMixin, TimestampM
 
     @property
     def is_usable_account(self) -> bool:
+        """Whether this account may hold a session at all.
+
+        `email_verified` is part of it, and deliberately: a model cannot read
+        configuration, so a deployment that waives address confirmation has to
+        settle the question before it gets here. `auth_service.login` promotes
+        the account on first sign-in when the requirement is off, which is what
+        keeps this property honest rather than special-casing it.
+        """
         return self.status == UserStatus.ACTIVE.value and self.email_verified
 
     @property

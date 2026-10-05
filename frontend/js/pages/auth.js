@@ -250,6 +250,21 @@ export function renderRegister() {
         marketing_consent: marketing.checked,
       });
       toast.info(result.message);
+
+      // A deployment can turn address confirmation off entirely
+      // (REQUIRE_EMAIL_VERIFICATION). Then the account is usable immediately
+      // and the server has already signed us in, so there is nothing to verify
+      // and nowhere to wait. Sending the reader to a "check your email" screen
+      // in that state is the one outcome that is wrong in every part.
+      if (result.signed_in) {
+        // The server set the session cookies in the registration response, so
+        // there is nothing to post again - the reader only has to be told who
+        // they are now.
+        store.set({ currentUser: result.user, authResolved: true });
+        router.navigate('/');
+        return;
+      }
+
       // The server hands back a ready-made confirmation link when it is not
       // actually able to send mail - a local instance, chiefly. Carrying it
       // through to the next screen is the whole difference between "check your

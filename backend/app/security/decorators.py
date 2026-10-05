@@ -410,7 +410,10 @@ def _assert_usable(user: User, *, allow: frozenset[str] = frozenset()) -> None:
             user.status_reason or "Аккаунт заблокирован.",
             code="account_banned",
         )
-    if not user.email_verified:
+    if not user.email_verified and current_app.config.get("REQUIRE_EMAIL_VERIFICATION", True):
+        # `REQUIRE_EMAIL_VERIFICATION=false` waives this, matching the check in
+        # `auth_service.login`. Both gates have to agree: relaxing only one
+        # would let the sign-in succeed and then fail every request after it.
         raise PermissionError_(
             "Подтвердите адрес электронной почты, чтобы пользоваться сервисом.",
             code="email_not_verified",

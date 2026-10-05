@@ -422,12 +422,23 @@ def login(identifier: str, password: str) -> tuple[User, str, str, UserSession]:
         user.password_hash = hash_password(password)
 
     if user.status == UserStatus.PENDING.value or not user.email_verified:
-        _record_attempt(identifier_hash, success=False, reason="unverified", user_id=user.id)
-        db.session.commit()
-        raise PermissionError_(
-            "Подтвердите адрес электронной почты, чтобы войти в аккаунт.",
-            code="email_not_verified",
-        )
+        # A deployment may turn the confirmation off - see
+        # `REQUIRE_EMAIL_VERIFICATION`. Then `PENDING` is simply the status a
+        # fresh account carries and means nothing, and refusing to sign in would
+        # lock out every account that ever registered.
+        if current_app.config.get("REQUIRE_EMAIL_VERIFICATION", True):
+            _record_attempt(identifier_hash, success=False, reason="unverified", user_id=user.id)
+            db.session.commit()
+            raise PermissionError_(
+                "Подтвердите адрес электронной почты, чтобы войти в аккаунт.",
+                code="email_not_verified",
+            )
+        # Promotion happens once, on the first sign-in, so the account carries an
+        # accurate status afterwards rather than looking unverified forever.
+        if user.status == UserStatus.PENDING.value:
+            user.status = UserStatus.ACTIVE.value
+            user.status_changed_at = utcnow()
+            log_event(logger, "INFO", "auth.verification_waived", user_id=user.id)
     if user.status == UserStatus.SUSPENDED.value:
         _record_attempt(identifier_hash, success=False, reason="suspended", user_id=user.id)
         db.session.commit()

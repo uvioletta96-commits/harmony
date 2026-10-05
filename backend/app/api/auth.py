@@ -9,7 +9,9 @@ from __future__ import annotations
 from flask import Blueprint, current_app, g, request
 
 from .. import i18n
+from ..extensions import db
 from ..models.base import utcnow
+from ..models.user import UserStatus
 from ..security.decorators import (
     auth_required,
     clear_auth_cookies,
@@ -87,20 +89,29 @@ def register():
     enforce("auth:register")
     payload = request.get_json(silent=True) or {}
     user, token = auth_service.register(payload)
-    # Whether a message actually left the building. "Check your inbox" is a
-    # promise, and with MAIL_ENABLED off the server cannot keep it - the reader
-    # has no way to tell a slow mail server from one that was never configured,
-    # and a `resend` button in that state can only ever lie too.
+    # Three states, and the response has to distinguish them - a single
+    # "check your inbox" promise is wrong in two of them.
+    #
+    #   required + mail working : a link is on its way
+    #   required + mail broken  : no link was sent; an administrator confirms
+    #   not required            : the account is usable now
+    #
+    # The last one is the important case. Telling somebody to check an inbox for
+    # a message the deployment has deliberately stopped sending is worse than
+    # saying nothing: they wait for something that will never come.
+    requires_verification = bool(current_app.config.get("REQUIRE_EMAIL_VERIFICATION", True))
     mail_enabled = bool(current_app.config.get("MAIL_ENABLED"))
     body = {
         "user": _public_session(user),
-        "requires_email_verification": True,
-        "verification_email_sent": mail_enabled,
+        "requires_email_verification": requires_verification,
+        "verification_email_sent": requires_verification and mail_enabled,
         "message": (
             "Проверьте почту: мы отправили ссылку для подтверждения аккаунта."
-            if mail_enabled
+            if requires_verification and mail_enabled
             else "Аккаунт создан. Этот сервер не отправляет почту, "
             "поэтому подтвердить адрес должен администратор."
+            if requires_verification
+            else "Аккаунт создан. Можно сразу войти."
         ),
     }
     # Development convenience: surface the confirmation link in the response
@@ -110,10 +121,46 @@ def register():
     # places that must agree on the route, and when the token is simply dropped -
     # as it was - the reader is told to check an inbox that, with MAIL_ENABLED
     # off, will never receive anything, and is left with no way forward.
-    if not current_app.config.get("MAIL_ENABLED") and current_app.debug:
+    if requires_verification and not current_app.config.get("MAIL_ENABLED") and current_app.debug:
         body["verification_token_dev_only"] = token
         body["verification_url"] = _verification_url(token)
-    return created(body)
+
+    if requires_verification:
+        return created(body)
+
+    # No confirmation to complete, so nobody should be routed to a page whose
+    # only purpose is to wait for one. The session is opened here rather than
+    # sent to the login form, so registering signs the reader in exactly as
+    # signing in would.
+    #
+    # The account is settled first: `User.is_usable_account` requires
+    # `email_verified`, and a model cannot read configuration. Promoting here
+    # means the property stays a plain fact about the row, and every later
+    # request - including the one this response is for - agrees.
+    user.email_verified = True
+    user.status = UserStatus.ACTIVE.value
+    user.status_changed_at = utcnow()
+    db.session.commit()
+    opened_user, access_token, refresh_token, _session = auth_service.open_session(user)
+    csrf = issue_csrf_token()
+    response = ok(
+        {
+            "user": _public_session(opened_user),
+            "message": body["message"],
+            "expires_in": current_app.config["ACCESS_TOKEN_TTL"],
+            "csrf_token": csrf,
+            "signed_in": True,
+            # Carried over from the body above so the client reads one shape
+            # regardless of which path answered. The client branches on
+            # `signed_in`, but a reader of the payload should not have to know
+            # that two different responses exist.
+            "requires_email_verification": body["requires_email_verification"],
+            "verification_email_sent": body["verification_email_sent"],
+        },
+    )
+    set_auth_cookies(response, access_token, refresh_token)
+    _set_csrf_cookie(response, csrf)
+    return response
 
 
 @bp.post("/auth/verify-email")

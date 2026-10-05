@@ -89,11 +89,18 @@ with open(index, "w", encoding="utf-8") as handle:
 print(f"  pointed {count} asset URLs at /{stamp}/")
 PYEOF
 
-# Keep the two previous builds so a browser mid-load on an old index.html can
-# still fetch what it was told to fetch.
+# Keep the previous builds so a browser mid-load on an old index.html can still
+# fetch what it was told to fetch.
 sudo find "$WEBROOT" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
 
 sudo cp "$WEBROOT/$STAMP/index.html" "$WEBROOT/index.html"
+
+# Files the shell links by a fixed URL, which therefore cannot carry the commit
+# id. The manifest is the important one: with no copy at the document root,
+# /site.webmanifest 404s, the browser concludes the site has no manifest, and
+# installability and standalone display disappear without any error anywhere.
+sudo cp "$WEBROOT/$STAMP/site.webmanifest" "$WEBROOT/site.webmanifest"
+sudo cp "$WEBROOT/$STAMP/robots.txt" "$WEBROOT/robots.txt"
 sudo chown -R root:root "$WEBROOT"
 sudo find "$WEBROOT" -type d -exec chmod 755 {} +
 sudo find "$WEBROOT" -type f -exec chmod 644 {} +

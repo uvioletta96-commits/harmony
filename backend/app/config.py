@@ -179,6 +179,21 @@ class BaseConfig:
     SERVE_UPLOADS: bool = env_bool("SERVE_UPLOADS", True)
 
     # --- Mail ----------------------------------------------------------
+    #: Whether a new account must confirm its address before it can sign in.
+    #:
+    #: This is what stops somebody registering with an address they do not own -
+    #: to squat a username, to hold a name against its owner, or to bounce mail
+    #: at somebody else. Turning it off makes the account unproven: whoever
+    #: typed the address is whoever owns it.
+    #:
+    #: It is a flag rather than deleted code because it is a property of the
+    #: deployment, not of the product. A host with no mail service can turn it
+    #: off and still use every other guarantee in this file; the day it gets a
+    #: mail service, one environment variable puts it back.
+    #:
+    #: Turning it on while `MAIL_ENABLED` is off is a misconfiguration: nobody
+    #: can confirm, so nobody can sign in. `production.validate()` refuses it.
+    REQUIRE_EMAIL_VERIFICATION: bool = env_bool("REQUIRE_EMAIL_VERIFICATION", True)
     MAIL_ENABLED: bool = env_bool("MAIL_ENABLED", True)
     MAIL_BACKEND: str = env("MAIL_BACKEND", "smtp")  # smtp|console|disabled
     MAIL_SERVER: str = env("MAIL_SERVER", "") or ""
@@ -385,6 +400,22 @@ class ProductionConfig(BaseConfig):
             )
         if self.MAIL_BACKEND == "smtp" and not self.MAIL_SERVER:
             relaxable.append("MAIL_SERVER is required when MAIL_BACKEND=smtp.")
+        if self.REQUIRE_EMAIL_VERIFICATION and not self.MAIL_ENABLED:
+            # Mandatory, and the only thing here that is. The others are
+            # obligations that degrade the service; this one makes the product
+            # unusable: no confirmation can be delivered, so every account that
+            # registers is permanently locked out of its own login.
+            mandatory.append(
+                "REQUIRE_EMAIL_VERIFICATION is true but MAIL_ENABLED is false, so no "
+                "confirmation can be delivered and nobody who registers can ever sign in. "
+                "Either configure a mail server or set REQUIRE_EMAIL_VERIFICATION=false."
+            )
+        if not self.REQUIRE_EMAIL_VERIFICATION:
+            relaxable.append(
+                "REQUIRE_EMAIL_VERIFICATION is off: anyone who registers with an address "
+                "they do not own gets a working account, so usernames and addresses are "
+                "unproven. Fine for a closed beta, not for an open registration."
+            )
         if not self.MAIL_ENABLED:
             relaxable.append(
                 "MAIL_ENABLED must be true so verification emails are delivered. "

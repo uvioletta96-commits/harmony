@@ -690,6 +690,11 @@
 .post-media .post-video:not(:hover):not(:focus-within) { controls: none; }
 .post-media .post-video::cue { font-size: 0.9em; }
 
+/* The browser refused audible autoplay and the clip fell back to muted. The
+   only cue a reader would otherwise get is silence they cannot explain, so the
+   controls stay visible and say what one tap does. */
+.post-media .post-video.is-blocked:not(:hover):not(:focus-within) { controls: show; }
+
 .post-actions {
   display: flex;
   align-items: center;
