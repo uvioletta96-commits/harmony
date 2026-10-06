@@ -153,17 +153,31 @@
 
 /* Fullscreen ------------------------------------------------------------------ */
 
-/* In fullscreen the browser's own chrome is already gone, so the site's header,
-   tabs and exit button are three more things between the reader and the video.
-   The feed fills the screen on its own. */
-.videos-page:fullscreen .videos-head,
-.videos-page:fullscreen .videos-tabs {
+/* A video the browser took fullscreen on its own - which is the only route iOS
+   Safari offers - covers the whole screen, so the site's own chrome has to go
+   with it. `:fullscreen` on the video's ancestors does not apply here, so the
+   rules below are on the page and hide the chrome whenever the *document* is in
+   fullscreen, whoever got us there. */
+body:has(.videos-page:fullscreen) .videos-head,
+body:has(.videos-page:fullscreen) .videos-tabs,
+body:has(video:fullscreen) ~ * .videos-head,
+body:has(video:fullscreen) ~ * .videos-tabs {
   display: none;
 }
 
+.videos-page:fullscreen { background: #000; height: 100%; }
 .videos-scroller:fullscreen,
 .videos-scroller:-webkit-full-screen {
   height: 100%;
+  background: #000;
+}
+
+/* The clip itself, when it is the fullscreen element. Sized to fill rather than
+   to keep its aspect ratio: a portrait video letterboxed inside a portrait
+   screen wastes most of the height. */
+video:fullscreen,
+video:-webkit-full-screen {
+  object-fit: contain;
   background: #000;
 }
 
@@ -174,6 +188,11 @@
   opacity: 0;
   pointer-events: none;
 }
+
+/* Fullscreen with the chrome hidden: no way back out except the keyboard or the
+   platform gesture, so the exit affordance stays. */
+body:has(.videos-page:fullscreen) .videos-exit,
+body:has(video:fullscreen) .videos-exit { display: inline-flex; }
 
 /* One screen ------------------------------------------------------------------ */
 

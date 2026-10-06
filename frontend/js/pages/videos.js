@@ -170,31 +170,58 @@ export async function render() {
 
   /** Enter or leave the browser's own fullscreen, on the scroller. */
   async function toggleFullscreen() {
+    const target = scroller;
+
+    // Which element to go fullscreen on.
+    //
+    // iOS Safari only honours fullscreen on the *video element itself*, and Chrome
+    // on Android only on a container that has a size - so the video is the target
+    // when there is one, and the scroller otherwise. Requesting the scroller first
+    // and falling back is wrong: on iOS it "succeeds" and then shows a black
+    // rectangle with no way out, which is the failure this avoids.
+    const video = current?.querySelector('video');
+    const element = video || target;
+
     try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else if (scroller.requestFullscreen) {
-        await scroller.requestFullscreen({ navigationUI: 'hide' });
-      } else if (scroller.webkitRequestFullscreen) {
-        // Safari on iPhone still only has the prefixed form, and this is the
-        // platform most readers are on.
-        scroller.webkitRequestFullscreen();
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        await exitFullscreenAnywhere();
+        return;
+      }
+      if (element.requestFullscreen) {
+        await element.requestFullscreen();
+      } else if (element.webkitRequestFullscreen) {
+        // Safari's prefixed form takes no options object and returns undefined
+        // rather than a promise.
+        element.webkitRequestFullscreen();
+      } else {
+        toast.warning(t('Браузер не разрешил полноэкранный режим'));
       }
     } catch {
-      // Denied - iOS Safari refuses fullscreen on an element inside a page unless
-      // the video itself is the target, and a refusal is not worth an error toast.
       toast.warning(t('Браузер не разрешил полноэкранный режим'));
     }
   }
 
+  async function exitFullscreenAnywhere() {
+    if (document.exitFullscreen) await document.exitFullscreen();
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+
   const onFullscreenChange = () => {
-    const on = Boolean(document.fullscreenElement);
+    const on = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
     fullscreenButton.replaceChildren(icon(on ? 'collapse' : 'expand', { size: 19 }));
     fullscreenButton.title = on ? t('Выйти из полного экрана') : t('Во весь экран');
     fullscreenButton.setAttribute('aria-label', fullscreenButton.title);
+    // A screen can enter fullscreen without the button - the reader pressing `f`
+    // twice, or the platform's own gesture - and the button has to tell the truth
+    // about the state rather than about the last click.
+    if (on && !current) syncPlaybackToScroll();
   };
   document.addEventListener('fullscreenchange', onFullscreenChange);
-  teardown.push(() => document.removeEventListener('fullscreenchange', onFullscreenChange));
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+  teardown.push(() => {
+    document.removeEventListener('fullscreenchange', onFullscreenChange);
+    document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+  });
 
   const state = { cursor: null, loading: false, done: false, started: false };
   const slides = [];
@@ -215,25 +242,36 @@ export async function render() {
     }
     if (!best) return;
 
+    // The whole fix for "the sound restarts over and over" is this early return.
+    //
+    // Every play() call stops whatever was playing first, so a scroll that reaches
+    // this function without needing a change restarts the clip from zero - and
+    // the sound audibly cuts and starts again. Measured on the deployed site: one
+    // screen of scrolling produced 3 plays and 3 pauses, because the nearest-slide
+    // calculation flips as the snap settles. Six seconds of doing nothing produced
+    // none, so the churn is entirely scroll-driven.
+    //
+    // Comparing against `current` rather than the DOM means the work happens once
+    // per screen entered, not once per scroll event.
+    if (best === current) return;
+
     for (const slide of slides) slide.classList.toggle('is-current', slide === best);
-    if (best !== current) {
-      current = best;
-      // A view is counted when a screen is actually reached, not when it is
-      // built: prefetching a page would otherwise count six videos the reader
-      // never watched, and a view count that inflates on a swipe is worthless.
-      const id = best.dataset.postId;
-      api.post(`/posts/${id}/views`, {}).catch(() => {
-        /* a lost view is not worth reporting; the count is a weak signal anyway */
-      });
-    }
+    current = best;
+
+    // A view is counted when a screen is actually reached, not when it is built:
+    // prefetching a page would otherwise count six videos the reader never watched,
+    // and a view count that inflates on a swipe is worthless.
+    const id = best.dataset.postId;
+    api.post(`/posts/${id}/views`, {}).catch(() => {
+      /* a lost view is not worth reporting; the count is a weak signal anyway */
+    });
 
     const video = best.querySelector('video');
     if (!video) return;
     // `userPaused` is per clip: tapping pauses, and a paused clip must not be
-    // restarted by the scroll handler two pixels later. That is the behaviour that
-    // makes a tap feel broken.
+    // restarted when the reader scrolls back to it. Honouring the pause here is
+    // what stops the sound from coming back on its own.
     if (video.dataset.userPaused === '1') return;
-    if (video === playing && !video.paused) return;
     play(video);
   };
 
@@ -364,13 +402,43 @@ export async function render() {
         video.muted = !video.muted;
         toast.info(video.muted ? t('Звук выключен') : t('Звук включён'));
       }
-    } else if (event.key === 'f') {
+    } else if (event.key === 'f' || event.key === 'F' || event.key === 'а' || event.key === 'А') {
       event.preventDefault();
       toggleFullscreen();
     }
   };
+
+  // On the document, not on the scroller.
+  //
+  // The scroller has `tabindex="0"` but nothing focuses it: a reader arrives by
+  // tapping, which puts focus on whatever they touched, and the arrow keys work
+  // only because the handler was on the element that happened to contain the tap.
+  // `f` in particular did nothing at all, because the browser does not focus a
+  // scroll container by itself. Listening on the document while this page is
+  // mounted is the fix, and the page's own teardown is the natural place to stop.
+  //
+  // Every key is ignored while the reader is typing, so `f` in the caption of a
+  // comment box does not throw the feed into fullscreen.
+  const onDocumentKeyDown = (event) => {
+    const target = event.target;
+    if (target instanceof HTMLElement) {
+      if (target.isContentEditable) return;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    // The scroller's own handler covers these and is bound to the element, so
+    // running them twice would page twice.
+    if (event.target === scroller || scroller.contains(event.target)) return;
+    if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', ' ', 'k', 'm', 'f', 'F', 'а', 'А'].includes(event.key)) {
+      onKeyDown(event);
+    }
+  };
   scroller.addEventListener('keydown', onKeyDown);
-  teardown.push(() => scroller.removeEventListener('keydown', onKeyDown));
+  document.addEventListener('keydown', onDocumentKeyDown);
+  teardown.push(() => {
+    scroller.removeEventListener('keydown', onKeyDown);
+    document.removeEventListener('keydown', onDocumentKeyDown);
+  });
 
   // A double tap likes. Bound to the *stage*, not delegated from the scroller: the
   // stage is what a reader aims at, and a scroller-level handler has to work out

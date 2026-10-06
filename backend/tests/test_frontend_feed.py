@@ -74,15 +74,84 @@ def test_the_scroller_is_the_scroll_container_not_the_document(source):
     )
 
 
-def test_fullscreen_hides_the_sites_own_chrome(source):
+def test_fullscreen_hides_the_sites_own_chrome():
     """In fullscreen the browser's bars are already gone. The site's header, tabs
-    and exit button are three more controls between the reader and the video."""
-    css = CSS.read_text(encoding="utf-8")
-    fullscreen = re.search(r"\.videos-page:fullscreen(.*?)\{", css, re.S)
-    assert fullscreen, "no :fullscreen rule"
+    and exit button are three more controls between the reader and the video.
 
-    block = re.search(r"\.videos-page:fullscreen \.videos-head,\s*\.videos-page:fullscreen \.videos-tabs \{(.*?)\}", css, re.S)
-    assert block and "display: none" in block.group(1)
+    Keyed on `body:has(...)` rather than on `.videos-page:fullscreen` alone,
+    because iOS Safari only offers fullscreen on the *video element* - so the
+    page never becomes the fullscreen element and the old rule never applied on
+    the platform most readers are on. The old selector is kept as a fallback for
+    browsers where the container is the fullscreen element.
+    """
+    css = CSS.read_text(encoding="utf-8")
+    body_rule = re.search(r"body:has\([^)]*fullscreen[^)]*\)[^{]*\{[^}]*display:\s*none", css, re.S)
+    assert body_rule, (
+        "nothing hides the header when the *video* is the fullscreen element, which "
+        "is the only route iOS Safari offers"
+    )
+    assert ".videos-head" in body_rule.group(0), "the body rule hides something that is not the header"
+
+
+def test_the_fullscreen_key_is_handled_off_the_scroller(source):
+    """`f` did nothing.
+
+    The handler was bound to the scroller, which has `tabindex="0"` but is never
+    focused: a reader arrives by tapping, so nothing has focus at all and the
+    single-letter shortcuts never fired. Bound to the document while the page is
+    mounted, with teardown to remove it, and ignoring keys typed into a field.
+    """
+    assert "document.addEventListener('keydown'" in source, (
+        "the shortcut handler is not on the document, so a reader who has not "
+        "focused the scroller cannot use it"
+    )
+    assert "'f'" in source, "no f key"
+
+    handler = re.search(r"const onDocumentKeyDown = \(event\) => \{(.*?)\n  \};", source, re.S)
+    assert handler, "no document key handler to inspect"
+    body = handler.group(1)
+    for guard, why in (
+        ("isContentEditable", "so `f` typed into a comment box does not go fullscreen"),
+        ("INPUT", "so a shortcut does not fire while the reader is typing"),
+        ("metaKey", "so `cmd+f` stays the browser's find"),
+    ):
+        assert guard in body, f"the document key handler ignores {guard}, {why}"
+
+    teardown = re.search(r"document\.removeEventListener\('keydown', onDocumentKeyDown\)", source)
+    assert teardown, "the document key handler is never removed, so it outlives the page"
+
+
+def test_fullscreen_prefers_the_video_element(source):
+    """Asking for the scroller on iOS "succeeds" and then shows a black rectangle
+    with no way out. The video is the only element iOS will honour."""
+    handler = re.search(r"async function toggleFullscreen\(\) \{(.*?)\n  \}", source, re.S)
+    assert handler, "no toggleFullscreen to inspect"
+    body = handler.group(1)
+    assert "requestFullscreen" in body
+    assert "webkitRequestFullscreen" in body, (
+        "iOS Safari only has the prefixed form, and it is the platform most "
+        "readers are on"
+    )
+    assert re.search(r"const element = video \|\| target", body), (
+        "fullscreen is requested on the container rather than the video, so on iOS "
+        "it shows a black rectangle with no way out"
+    )
+    # `navigationUI` is the specific thing that made it throw.
+    assert "navigationUI" not in body, (
+        "requestFullscreen({navigationUI: 'hide'}) is rejected by some engines, so "
+        "the whole call throws and nothing happens"
+    )
+
+
+def test_the_deferred_pause_is_cleared_on_teardown(source):
+    """A pending pause that is never cancelled fires after the page is gone, and
+    touches a node that is no longer in the document."""
+    blocks = re.findall(r"teardown\.push\(\(\) => \{(.*?)\n  \}\);", source, re.S)
+    assert blocks, "no teardown blocks"
+    assert any("clearTimeout" in block for block in blocks), (
+        "no teardown entry clears the pending-tap timer, so a scheduled pause fires "
+        "after the page has gone"
+    )
 
 
 def test_a_double_tap_does_not_also_pause(source):
@@ -128,13 +197,38 @@ def test_a_double_tap_does_not_also_pause(source):
     )
 
 
-def test_the_deferred_pause_is_cleared_on_teardown(source):
-    """A pending pause that is never cancelled fires after the page is gone, and
-    touches a node that is no longer in the document."""
-    teardown_block = re.search(r"teardown\.push\(\(\) => \{(.*?)\n  \}\);", source, re.S)
-    assert teardown_block, "no teardown block"
-    assert "clearTimeout" in teardown_block.group(1), (
-        "teardown does not clear the pending-tap timer"
+
+def test_scrolling_does_not_restart_the_current_clip(source):
+    """The bug the reader reported: the sound cutting and restarting over and over.
+
+    Measured on the deployed site, one screen of scrolling produced `plays: 3,
+    pauses: 3`; six seconds of doing nothing produced none of either. So the churn
+    was entirely scroll-driven, and the cause is that `play()` stops whatever was
+    playing first - so any reach of the sync that does not change the current
+    screen restarts the clip from zero, and the nearest-slide calculation flips
+    more than once as a snap settles.
+
+    The fix is the early return, and it is the whole fix. Pinned here because the
+    code looks redundant: there is a second, weaker guard further down that
+    catches most of it, which is exactly why it was written twice and fixed once.
+    """
+    sync = re.search(r"const syncPlaybackToScroll = \(\) => \{(.*?)\n  \};", source, re.S)
+    assert sync, "no syncPlaybackToScroll to inspect"
+    body = sync.group(1)
+
+    early = re.search(r"if \(best === current\) return;", body)
+    assert early, (
+        "the sync runs its playback work on every scroll event instead of only when "
+        "the current screen actually changes, so the clip restarts from zero and the "
+        "sound cuts and restarts on each swipe"
+    )
+
+    # And it must come before anything that touches playback, otherwise it guards
+    # nothing.
+    play_call = body.find("play(video)")
+    assert 0 <= early.start() < play_call, (
+        "the early return is after the play() call, so it no longer prevents the "
+        "restart"
     )
 
 
