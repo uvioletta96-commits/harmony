@@ -61,15 +61,20 @@ def feed():
 @bp.get("/videos")
 @auth_optional
 def video_feed():
-    """Vertical video feed: posts carrying at least one clip, one clip per screen.
+    """Vertical feed: one post per screen, filling it with one attachment.
 
     Separate from ``/feed`` rather than a ``mode`` on it, because the two are not
-    the same list in a different order - this one excludes every post without
-    video and keeps only the first clip of the rest.
+    the same list in a different order - this one takes a single attachment per
+    post and shows nothing else.
+
+    ``kind`` picks video (the default), photo, or both.
     """
     enforce("global")
     page = post_service.get_video_feed(
-        _viewer(), cursor=request.args.get("cursor"), limit=request.args.get("limit")
+        _viewer(),
+        cursor=request.args.get("cursor"),
+        limit=request.args.get("limit"),
+        kind=(request.args.get("kind") or "video").strip().lower(),
     )
     return ok(page.items, meta=page.to_meta({"mode": "videos"}))
 
@@ -173,6 +178,25 @@ def restore_post(public_id: str):
 # ---------------------------------------------------------------------------
 # Reactions
 # ---------------------------------------------------------------------------
+
+
+@bp.post("/posts/<public_id>/views")
+@auth_optional
+def record_view(public_id: str):
+    """Count one view of a post.
+
+    Separate from opening the post: the vertical feed shows a clip without anyone
+    visiting its page, and a view count that only moves when the page is opened
+    reports zero plays for a video that has been watched fifty times.
+
+    Buffer-only, so this is cheap and takes no lock. It is also the endpoint a
+    client is most tempted to call in a loop, so the per-account rate limit is
+    tight and a rejected call is a normal outcome the client should ignore.
+    """
+    enforce("post:view")
+    post = post_service.get_post(public_id, _viewer())
+    post_service.record_post_view(post, viewer=g.current_user)
+    return no_content()
 
 
 @bp.post("/posts/<public_id>/reactions")

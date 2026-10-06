@@ -139,6 +139,11 @@ class Post(PrimaryKeyMixin, PublicIdMixin, TimestampMixin, db.Model):
             # the composer. One explicit sort makes the order the same on the
             # response that created the post and on every later read.
             "media": [m.to_dict() for m in sorted(self.media or [], key=lambda m: m.position)],
+            # The stored total. Buffered views are added on top of this by
+            # `get_video_feed`, which is the only place a live counter is read -
+            # a denormalised column that nobody reconciles is a number that is
+            # quietly wrong, and quietly wrong is worse than absent.
+            "views_count": self.views_count,
             "created_at": iso(self.created_at),
             "edited_at": iso(self.edited_at),
             "is_owner": bool(viewer is not None and self.author_id == viewer.id),

@@ -12,6 +12,18 @@ const PATHS = {
   // Triangle, not a disc: the flat base is what reads as "play" at 26px, where a
   // circle with a triangle inside turns into a smudge.
   play: 'M5.6 3.4l6.6 4.6-6.6 4.6z',
+  // Four corners pointing out, and the same shape pointing in. The convention
+  // platform fullscreen buttons use: the icon shows what the control *does*, not
+  // what the current state is.
+  expand: 'M2.2 5.8V3.2a1 1 0 011-1h2.6M14 5.8V3.2a1 1 0 00-1-1h-2.6M2.2 10.2v2.6a1 1 0 001 1h2.6M14 10.2v2.6a1 1 0 01-1 1h-2.6',
+  collapse: 'M5.8 2.2H3.2a1 1 0 00-1 1v2.6M10.2 2.2h2.6a1 1 0 011 1v2.6M5.8 13.8H3.2a1 1 0 01-1-1v-2.6M10.2 13.8h2.6a1 1 0 001-1v-2.6',
+  pause: 'M5.6 3.4v9.2M10.4 3.4v9.2',
+  volume: 'M7.4 3.2L4 6H2.2v4H4l3.4 2.8zM10 6.2a2.4 2.4 0 010 3.6M11.9 4.2a5 5 0 010 7.6',
+  volumeOff: 'M7.4 3.2L4 6H2.2v4H4l3.4 2.8zM10.2 6.6l3.4 2.8M13.6 6.6l-3.4 2.8',
+  eye: 'M1.6 8s2.4-4.2 6.4-4.2S14.4 8 14.4 8 12 12.2 8 12.2 1.6 8 1.6 8zM8 9.8a1.8 1.8 0 100-3.6 1.8 1.8 0 000 3.6z',
+  // Sliders, for the toggle that hides the chrome. Two lines and two knobs: at
+  // 22px anything more detailed is a smudge.
+  sliders: 'M2.4 4.6h4.4M9.6 4.6h4M2.4 11.4h4.4M9.6 11.4h4M8 2.8v3.6M8 9.6v3.6',
   search: 'M7.2 12.4a5.2 5.2 0 100-10.4 5.2 5.2 0 000 10.4zM11 11l3 3',
   bell: 'M8 1.8a4.2 4.2 0 00-4.2 4.2c0 3.1-1.2 4.1-1.2 4.1h10.8s-1.2-1-1.2-4.1A4.2 4.2 0 008 1.8zM6.6 12.4a1.6 1.6 0 002.8 0',
   smile: 'M8 14.2A6.2 6.2 0 108 1.8a6.2 6.2 0 000 12.4zM6 6.4v.1M10 6.4v.1M5.4 9.4a3.4 3.4 0 005.2 0',

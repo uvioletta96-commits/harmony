@@ -798,29 +798,39 @@ paths:
   /videos:
     get:
       tags: [Posts]
-      summary: The vertical video feed
+      summary: The vertical feed
       description: |
-        Posts carrying at least one clip, one clip per screen, newest first.
+        One post per screen, filling it with a single attachment, newest first.
 
         A separate operation rather than a `mode` on `/feed` because the two are
-        not the same list in a different order: this one excludes every post
-        without video, and for a post with several clips returns only the first.
+        not the same list in a different order: this one takes one attachment per
+        post and shows nothing else around it.
+
+        `kind` selects what fills the screen - `video` (the default), `photo` for
+        the same feed for stills, or `all`. Within a post the largest attachment
+        wins rather than the first, so a photo-then-video post shows the clip.
 
         Keyset-paginated on `created_at` rather than offset, because a viewer
         scrolling reaches page six by scrolling and an upload arriving between two
         requests would otherwise drop or repeat a clip mid-watch.
       security: []
       parameters:
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [video, photo, all]
+            default: video
         - $ref: "#/components/parameters/Cursor"
         - $ref: "#/components/parameters/Limit"
       responses:
         "200":
-          description: Posts with video, newest first
+          description: Posts with media, newest first
           content:
             application/json:
               schema: { $ref: "#/components/schemas/PaginatedPosts" }
         "422":
-          description: A query parameter is not an integer
+          description: A query parameter is not valid
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -959,6 +969,34 @@ paths:
       responses:
         "200": { description: Restored }
         "409": { description: Post was not deleted }
+
+  /posts/{post_id}/views:
+    post:
+      tags: [Posts]
+      summary: Count one view
+      description: |
+        Separate from opening the post, because the vertical feed shows a clip
+        without anyone visiting its page - a view count that only moves on page
+        opens reports zero plays for a video watched fifty times.
+
+        Buffered in Redis and written by the nightly flush, so the call is cheap and
+        takes no lock. Deduplicated per account for an hour: the client counts a
+        view whenever a screen becomes current, and without that, scrolling up and
+        down one page inflates the number on its own.
+
+        `204` either way. A deduplicated call is a normal outcome, not an error, so
+        a client should not retry and should not be told which happened.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PostId"
+      responses:
+        "204":
+          description: Counted, or already counted by this account in the last hour
+        "429":
+          description: Too many calls from this account or address
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /posts/{post_id}/reactions:
     post:

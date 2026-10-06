@@ -134,6 +134,11 @@ class BaseConfig:
         "post:delete": env("RATE_LIMIT_POST_DELETE", "60/hour"),
         "comment:create": env("RATE_LIMIT_COMMENT_CREATE", "60/hour"),
         "reaction:write": env("RATE_LIMIT_REACTION", "300/hour"),
+        # A view is the cheapest write on the site and the one a client is most
+        # tempted to call in a loop. Generous for a reader paging through a feed,
+        # tight enough that a loop cannot inflate a number - 600 an hour is about
+        # two screens a second sustained.
+        "post:view": env("RATE_LIMIT_POST_VIEW", "600/hour"),
         "search:query": env("RATE_LIMIT_SEARCH", "120/hour"),
         "chat:send": env("RATE_LIMIT_CHAT_SEND", "120/minute"),
         "upload:image": env("RATE_LIMIT_UPLOAD", "30/hour"),

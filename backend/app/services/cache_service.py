@@ -221,9 +221,53 @@ def rate_counter_add(key: str, amount: int = 1, ttl: int = 3600) -> int:  # prag
         return 0
 
 
+def rate_counter_set_once(key: str, ttl: int = 3600) -> bool:
+    """Claim a key for an account. True if this call was the one that set it.
+
+    For deduplicating a counter that must not be inflated by one reader acting
+    twice. `SET key 1 NX EX ttl` rather than a get followed by a set: two requests
+    from two tabs interleave, and both would see "not seen" and both count.
+    """
+    client = get_redis()
+    if client is None:
+        # Without Redis there is nowhere to record the claim, so every call counts.
+        # Over-counting is the better failure than a view count frozen at zero.
+        return True
+    try:
+        return bool(client.set(key, 1, nx=True, ex=ttl))
+    except Exception:
+        return True
+
+
+def counters_read(keys: list[str]) -> dict[str, int]:
+    """Read several counters in one round trip.
+
+    A pipeline rather than a loop: the vertical feed wants a view count per post,
+    and eight posts means eight round trips to a server this box also has to run
+    PostgreSQL and the app on. Returns only the keys that exist - a missing counter
+    is a post nobody has watched yet, which is not an error.
+    """
+    client = get_redis()
+    if client is None or not keys:
+        return {}
+    try:
+        pipe = client.pipeline()
+        for key in keys:
+            pipe.get(key)
+        values = pipe.execute()
+    except Exception:
+        return {}
+    return {
+        key: int(value)
+        for key, value in zip(keys, values, strict=True)
+        if value is not None
+    }
+
+
 __all__ = [
     "NAMESPACE",
     "cached",
+    "counters_read",
     "delete",
     "delete_pattern",
     "feed_keys",
@@ -233,6 +277,7 @@ __all__ = [
     "invalidate_posts",
     "invalidate_user",
     "post_keys",
+    "rate_counter_set_once",
     "set",
     "user_keys",
 ]

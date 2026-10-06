@@ -33,6 +33,11 @@ create_post_schema_fields = ("body", "visibility", "media_ids", "alt_texts")
 
 FEED_MODES = ("for_you", "shuffled", "latest", "following", "saved")
 
+#: What fills a screen in the vertical feed. `photo` is the same feed for stills,
+#: which is a different thing from scrolling a grid of thumbnails: one image per
+#: screen, no chrome around it.
+VIDEO_FEED_KINDS = ("video", "photo", "all")
+
 #: The mode used when the client does not ask for one. Deliberately not
 #: ``latest``: a chronological feed is the same page in the same order for
 #: everyone, which is a fine archive and a poor home page.
@@ -174,59 +179,100 @@ def get_video_feed(
     *,
     cursor: str | None = None,
     limit: int | None = None,
+    kind: str = "video",
 ) -> Page:
-    """One page of the vertical video feed - posts that carry at least one clip.
+    """One page of the vertical feed - one post per screen, largest clip first.
 
     Kept out of ``get_feed`` deliberately. The two answer different questions and
     their orders are different on purpose:
 
       - the main feed is a scroller, so it interleaves text, photos and video and
         ranks them together;
-      - this is one clip per screen, so it is only posts with video, and it is
-        ordered to keep a viewer moving rather than to be fair to anything.
+      - this is one post per screen, so it takes one attachment per post and
+        fills the screen with it.
 
     Keyset-paginated on ``created_at`` rather than offset: a viewer scrolling a
     vertical feed reaches page 6 by scrolling, and with a new upload arriving
     between two requests an offset would silently drop or repeat a clip in the
     middle of what they are watching.
 
-    Only the *first* video of a post is returned. A post with three clips would
+    ``kind`` selects what fills the screen:
+
+      ``video`` (default)  posts with a clip, one clip per screen
+      ``photo``  posts with a photo, one photo per screen - the same feed for
+                 stills, which is a different thing from scrolling a grid
+      ``all``  either, ranked by the same keyset order
+
+    One attachment per post, never several. A post with three clips would
     otherwise appear three times, and one person's three videos in a row reads as
-    the feed being broken.
+    the feed being broken. Within a post the *largest* attachment wins rather than
+    the first: for `all` that is the one that fills a screen, and for a
+    photo-then-video post it means the clip is not skipped in favour of a thumbnail.
     """
     page_size = clamp_page_size(limit, default=int(current_app.config.get("VIDEO_FEED_PAGE_SIZE", 8)))
 
+    if kind not in VIDEO_FEED_KINDS:
+        raise ValidationError("Неизвестный тип ленты.", code="invalid_feed_kind")
+
     # Subquery rather than a join: a join would multiply one post into a row per
-    # attached clip and every count in the response would be wrong.
-    has_video = (
+    # attached attachment and every count in the response would be wrong.
+    wanted = "video/%" if kind == "video" else "image/%" if kind == "photo" else "%"
+    has_media = (
         select(PostMedia.id)
-        .where(PostMedia.post_id == Post.id, PostMedia.mime_type.like("video/%"))
+        .where(PostMedia.post_id == Post.id, PostMedia.mime_type.like(wanted))
         .exists()
     )
 
-    query = (
-        visible_posts_query(viewer)
-        .where(has_video)
-        .options(*_post_options())
-    )
+    query = visible_posts_query(viewer).where(has_media).options(*_post_options())
     page = keyset_page(
         query, model=Post, page_size=page_size, cursor=cursor, descending=True,
         order_fields=("created_at", "id"),
     )
 
     items = serialise_posts(page.items, viewer)
-    # Keep one clip per post, and only the clip. The serialised post keeps every
-    # attachment otherwise, so a photo-and-video post would show its photo here.
+
+    # Buffered views, added on top of the stored total. The column is only written
+    # by the nightly flush, so without this a video published an hour ago reads as
+    # having zero views - which on a feed whose whole point is watching is the one
+    # number that must not be wrong. One pipeline read for the whole page.
+    from .cache_service import counters_read
+
+    buffered = counters_read([f"views:{item['id']}" for item in items])
     for item in items:
-        videos = [
-            attachment
-            for attachment in item.get("media", [])
-            if str(attachment.get("mime_type", "")).startswith("video/")
-        ]
-        item["media"] = videos[:1]
-        item["is_video"] = bool(videos)
+        item["views_count"] = int(item.get("views_count") or 0) + buffered.get(f"views:{item['id']}", 0)
+        attachments = item.get("media", [])
+        if kind == "video":
+            pool = [a for a in attachments if str(a.get("mime_type", "")).startswith("video/")]
+        elif kind == "photo":
+            pool = [a for a in attachments if str(a.get("mime_type", "")).startswith("image/")]
+        else:
+            pool = list(attachments)
+
+        # Largest first, then first by position. For a photo-then-video post this
+        # is what keeps the clip, rather than the photo that happens to sort first.
+        chosen = sorted(
+            pool,
+            key=lambda a: (int(a.get("width") or 0) * int(a.get("height") or 0), -_position_of(a)),
+            reverse=True,
+        )[:1]
+
+        item["media"] = chosen
+        item["is_video"] = bool(chosen) and str(chosen[0].get("mime_type", "")).startswith("video/")
+        item["is_photo"] = bool(chosen) and not item["is_video"]
+        # `media_count` lets the page say "ещё 3 фото" instead of pretending the
+        # post is one attachment.
+        item["media_count"] = len(attachments)
 
     return Page(items=items, next_cursor=page.next_cursor, has_more=page.has_more)
+
+
+def _position_of(attachment: dict[str, Any]) -> int:
+    """Sort key for attachments the serialiser did not number.
+
+    `Post.to_dict` returns attachments in position order but without the number,
+    so the index in the list stands in for it.
+    """
+    return int(attachment.get("position") or 0)
 
 
 def get_user_posts(
@@ -553,15 +599,39 @@ def unclaimed_media_for(user: User, storage_keys: list[str]) -> list[PostMedia]:
     return [oldest[key] for key in storage_keys if key in oldest]
 
 
-def record_post_view(post: Post) -> None:
+def record_post_view(post: Post, viewer: User | None = None) -> bool:
     """Count a view without a per-request UPDATE.
 
-    Buffered in Redis and flushed by Celery: a view is a weak signal and does
-    not justify a write amplification cost on the read path.
+    Buffered in Redis and flushed by the nightly job: a view is a weak signal and
+    does not justify a write amplification cost on the read path.
+
+    Deduplicated per account for an hour. In a vertical feed the same clip is
+    reached again every time the reader scrolls back to it, and the client counts a
+    view whenever a screen becomes current - so without this, scrolling up and down
+    one page inflates the number on its own, which is exactly how a view count
+    stops meaning anything.
+
+    Anonymous viewers are not deduplicated: there is nothing stable to key on, and
+    an IP is shared by a school, an office and a carrier NAT. They are counted,
+    which over-counts rather than under-counts - the better direction for a signal
+    nobody is paid on the accuracy of.
+
+    Returns whether the view was counted, so a caller can tell a deduplicated call
+    from a counted one without keeping its own state.
     """
-    from .cache_service import rate_counter_add
+    from .cache_service import rate_counter_add, rate_counter_set_once
+
+    # Set-if-absent, not get-then-set: two tabs open on the same clip would both
+    # see "not seen" and both count.
+    if (
+        viewer is not None
+        and viewer.is_usable_account
+        and not rate_counter_set_once(f"viewseen:{post.public_id}:{viewer.id}", ttl=3600)
+    ):
+        return False
 
     rate_counter_add(f"views:{post.public_id}", 1, ttl=86400)
+    return True
 
 
 def rich_body(post: Post) -> list[dict[str, Any]]:
