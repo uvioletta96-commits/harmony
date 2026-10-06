@@ -19,16 +19,19 @@ import { compactNumber } from '../core/format.js';
 
 const NAV = [
   { href: '/', label: t('Лента'), icon: 'home', key: null },
+  { href: '/videos', label: t('Видео'), icon: 'play', key: null },
   { href: '/search', label: t('Поиск'), icon: 'search', key: null },
   { href: '/notifications', label: t('Уведомления'), icon: 'bell', key: 'notifications' },
   { href: '/chat', label: t('Сообщения'), icon: 'mail', key: 'messages' },
   { href: '/settings', label: t('Настройки'), icon: 'settings', key: null },
 ];
 
+// Deliberately four items, not five: the bar has room for four comfortably at
+// 360px, and a fifth wraps or shrinks the labels until they are unreadable. Video
+// is reachable from the feed's own header and from this bar on wider screens.
 const MOBILE_NAV = [
   { href: '/', label: t('Лента'), icon: 'home', key: null },
-  { href: '/search', label: t('Поиск'), icon: 'search', key: null },
-  { href: '/notifications', label: t('Входящие'), icon: 'bell', key: 'notifications' },
+  { href: '/videos', label: t('Видео'), icon: 'play', key: null },
   { href: '/chat', label: t('Сообщения'), icon: 'mail', key: 'messages' },
   { href: '/settings', label: t('Профиль'), icon: 'user', key: null },
 ];

@@ -169,6 +169,66 @@ def get_feed(
     )
 
 
+def get_video_feed(
+    viewer: User | None,
+    *,
+    cursor: str | None = None,
+    limit: int | None = None,
+) -> Page:
+    """One page of the vertical video feed - posts that carry at least one clip.
+
+    Kept out of ``get_feed`` deliberately. The two answer different questions and
+    their orders are different on purpose:
+
+      - the main feed is a scroller, so it interleaves text, photos and video and
+        ranks them together;
+      - this is one clip per screen, so it is only posts with video, and it is
+        ordered to keep a viewer moving rather than to be fair to anything.
+
+    Keyset-paginated on ``created_at`` rather than offset: a viewer scrolling a
+    vertical feed reaches page 6 by scrolling, and with a new upload arriving
+    between two requests an offset would silently drop or repeat a clip in the
+    middle of what they are watching.
+
+    Only the *first* video of a post is returned. A post with three clips would
+    otherwise appear three times, and one person's three videos in a row reads as
+    the feed being broken.
+    """
+    page_size = clamp_page_size(limit, default=int(current_app.config.get("VIDEO_FEED_PAGE_SIZE", 8)))
+
+    # Subquery rather than a join: a join would multiply one post into a row per
+    # attached clip and every count in the response would be wrong.
+    has_video = (
+        select(PostMedia.id)
+        .where(PostMedia.post_id == Post.id, PostMedia.mime_type.like("video/%"))
+        .exists()
+    )
+
+    query = (
+        visible_posts_query(viewer)
+        .where(has_video)
+        .options(*_post_options())
+    )
+    page = keyset_page(
+        query, model=Post, page_size=page_size, cursor=cursor, descending=True,
+        order_fields=("created_at", "id"),
+    )
+
+    items = serialise_posts(page.items, viewer)
+    # Keep one clip per post, and only the clip. The serialised post keeps every
+    # attachment otherwise, so a photo-and-video post would show its photo here.
+    for item in items:
+        videos = [
+            attachment
+            for attachment in item.get("media", [])
+            if str(attachment.get("mime_type", "")).startswith("video/")
+        ]
+        item["media"] = videos[:1]
+        item["is_video"] = bool(videos)
+
+    return Page(items=items, next_cursor=page.next_cursor, has_more=page.has_more)
+
+
 def get_user_posts(
     owner: User,
     viewer: User | None,

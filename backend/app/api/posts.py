@@ -58,6 +58,22 @@ def feed():
     return ok(page.items, meta=page.to_meta({"mode": mode}))
 
 
+@bp.get("/videos")
+@auth_optional
+def video_feed():
+    """Vertical video feed: posts carrying at least one clip, one clip per screen.
+
+    Separate from ``/feed`` rather than a ``mode`` on it, because the two are not
+    the same list in a different order - this one excludes every post without
+    video and keeps only the first clip of the rest.
+    """
+    enforce("global")
+    page = post_service.get_video_feed(
+        _viewer(), cursor=request.args.get("cursor"), limit=request.args.get("limit")
+    )
+    return ok(page.items, meta=page.to_meta({"mode": "videos"}))
+
+
 @bp.get("/posts/search")
 @auth_optional
 def search():

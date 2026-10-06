@@ -9,6 +9,9 @@
 
 const PATHS = {
   home: 'M2.5 6.8L8 2.2l5.5 4.6V13a.8.8 0 01-.8.8H9.6V9.9H6.4v3.9H3.3a.8.8 0 01-.8-.8V6.8z',
+  // Triangle, not a disc: the flat base is what reads as "play" at 26px, where a
+  // circle with a triangle inside turns into a smudge.
+  play: 'M5.6 3.4l6.6 4.6-6.6 4.6z',
   search: 'M7.2 12.4a5.2 5.2 0 100-10.4 5.2 5.2 0 000 10.4zM11 11l3 3',
   bell: 'M8 1.8a4.2 4.2 0 00-4.2 4.2c0 3.1-1.2 4.1-1.2 4.1h10.8s-1.2-1-1.2-4.1A4.2 4.2 0 008 1.8zM6.6 12.4a1.6 1.6 0 002.8 0',
   smile: 'M8 14.2A6.2 6.2 0 108 1.8a6.2 6.2 0 000 12.4zM6 6.4v.1M10 6.4v.1M5.4 9.4a3.4 3.4 0 005.2 0',

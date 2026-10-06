@@ -795,6 +795,36 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PaginatedPosts" }
 
+  /videos:
+    get:
+      tags: [Posts]
+      summary: The vertical video feed
+      description: |
+        Posts carrying at least one clip, one clip per screen, newest first.
+
+        A separate operation rather than a `mode` on `/feed` because the two are
+        not the same list in a different order: this one excludes every post
+        without video, and for a post with several clips returns only the first.
+
+        Keyset-paginated on `created_at` rather than offset, because a viewer
+        scrolling reaches page six by scrolling and an upload arriving between two
+        requests would otherwise drop or repeat a clip mid-watch.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Posts with video, newest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginatedPosts" }
+        "422":
+          description: A query parameter is not an integer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /posts/search:
     get:
       tags: [Posts]
