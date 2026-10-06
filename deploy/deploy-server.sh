@@ -33,6 +33,26 @@ git -C "$APP" reset --hard origin/main
 git -C "$APP" clean -fdq -e .venv -e .env
 git -C "$APP" log --oneline -1
 
+# Replace this script with the one in the repository it just pulled, then run
+# that. Without this the copy on the server drifts from the copy in the repo and
+# nothing says so: a deploy script that cannot deploy itself is a deploy script
+# that silently stops doing part of its job. This is exactly how the `vendor/`
+# repointing rule went missing - the published site stopped loading the Socket.IO
+# bundle while the script claiming to publish it had the rule and was not the
+# script being run.
+#
+# Guarded so the fetch above is not repeated, and so the recursion stops: the
+# fresh copy sees itself already in place and does not re-exec.
+SELF=/home/harmony/deploy.sh
+CANON=$APP/deploy/deploy-server.sh
+if [ -f "$CANON" ] && ! cmp -s "$CANON" "$SELF"; then
+  say "update this script from the repository"
+  install -m 0755 "$CANON" "$SELF.next"
+  mv "$SELF.next" "$SELF"
+  echo "  replaced with $(git -C "$APP" rev-parse --short HEAD)'s copy; re-running it"
+  exec bash "$SELF" "$@"
+fi
+
 say "apply migrations if this commit adds any"
 # There is no Alembic history in the repository yet, so the schema is created
 # from the models. `create_all` is additive and idempotent: it adds tables and

@@ -337,3 +337,138 @@ def test_csp_no_longer_carves_out_the_socket_cdn(app):
     assert script_src.strip() == "script-src 'self'", script_src
     assert "cdn.socket.io" not in header
     assert "cdn.jsdelivr.net" not in script_src
+
+
+# ---------------------------------------------------------------------------
+# Handshake
+#
+# Everything above is about presence being *reported* correctly. These are about
+# the socket server actually having the handlers that report it.
+# ---------------------------------------------------------------------------
+
+#: Every event the frontend can send. A missing one is a feature that silently
+#: does nothing - the client emits, the server has no listener, no error.
+EXPECTED_EVENTS = {
+    "connect",
+    "disconnect",
+    "conversation:join",
+    "conversation:leave",
+    "conversation:read",
+    "message:send",
+    "message:typing",
+    "presence:ping",
+}
+
+
+def test_handlers_survive_init_app(app):
+    """The regression: `socketio.server.handlers['/']` was empty.
+
+    `SocketIO(...)` builds its server eagerly, so a module decorated with
+    `@socketio.on` registers on that server; `init_app` then replaces the server
+    with a fresh one and replays only the (empty) pending queue. Handlers
+    registered before `init_app` are lost without a word.
+    """
+    from app.extensions import socketio
+
+    assert socketio.server is not None, "precondition: init_app built a server"
+    assert set(socketio.server.handlers.get("/", {})) >= EXPECTED_EVENTS
+
+
+def test_the_realtime_package_does_not_import_events_eagerly():
+    """Pin the fix. `app.realtime.__init__` used to do `from . import events`,
+    which pulled the handlers in before `init_app` and got them discarded.
+
+    Checked against the source rather than `sys.modules`, because by the time this
+    runs the factory has imported `events` on purpose and the module is
+    legitimately loaded.
+    """
+    import ast
+
+    package = pathlib.Path(__file__).resolve().parents[1] / "app" / "realtime" / "__init__.py"
+    tree = ast.parse(package.read_text(encoding="utf-8"))
+
+    eager = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in ("events", None) and node.level:
+            eager.update(alias.name for alias in node.names)
+        if isinstance(node, ast.Import):
+            eager.update(alias.name for alias in node.names)
+
+    assert "events" not in eager, (
+        "app/realtime/__init__.py imports events, which registers the handlers "
+        "before init_app replaces the server and throws them away"
+    )
+
+
+def _issue(user):
+    from app.security.decorators import issue_session
+
+    access_token, _refresh, _session = issue_session(user)
+    return access_token
+
+
+def test_handshake_registers_the_user(app, make_user):
+    """A real handshake puts the account in the registry, and leaves it on
+    disconnect."""
+    from app.extensions import socketio
+    from app.realtime.manager import _connections, clear_registry
+
+    user = make_user()
+    clear_registry()
+
+    client = socketio.test_client(app)
+    client.connect(auth={"token": _issue(user)})
+
+    assert _connections, "the handshake registered nothing"
+    assert {entry["user_id"] for entry in _connections.values()} == {user.id}
+
+    client.disconnect()
+    assert not _connections, "a disconnect left the connection registered"
+
+
+def test_a_handshake_without_a_token_is_refused(app):
+    """The other half of the bug: with no handlers, `handle_connect` never ran, so
+    nothing refused an anonymous socket either. An unauthenticated client could
+    open a connection to the live chat endpoint."""
+    from app.extensions import socketio
+
+    client = socketio.test_client(app)
+    assert not client.connect(auth={}), "an unauthenticated socket was accepted"
+
+
+def test_a_handshake_with_a_bogus_token_is_refused(app, make_user):
+    from app.extensions import socketio
+
+    client = socketio.test_client(app)
+    assert not client.connect(auth={"token": "not-a-real-token"})
+
+
+def test_a_handshake_for_a_banned_account_is_refused(app, make_user):
+    from app.extensions import db, socketio
+    from app.models.user import UserStatus
+
+    banned = make_user()
+    token = _issue(banned)
+    banned.status = UserStatus.BANNED.value
+    db.session.commit()
+
+    client = socketio.test_client(app)
+    assert not client.connect(auth={"token": token})
+
+
+def test_presence_becomes_true_for_a_connected_account(app, make_user):
+    """The two halves together: the handshake registers, and the field reports it."""
+    from app.extensions import socketio
+    from app.realtime.manager import clear_registry
+
+    user = make_user()
+    clear_registry()
+    assert user.to_public_dict(user)["is_online"] is False
+
+    client = socketio.test_client(app)
+    client.connect(auth={"token": _issue(user)})
+
+    assert user.to_public_dict(user)["is_online"] is True
+
+    client.disconnect()
+    assert user.to_public_dict(user)["is_online"] is False

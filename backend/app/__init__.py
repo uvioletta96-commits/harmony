@@ -133,8 +133,6 @@ def _init_extensions(app: Flask) -> None:
     if not on_serverless():
         start_redis_supervisor(app)
 
-    from .realtime import events as _events  # noqa: F401  (registers handlers)
-
     # The message queue is what makes Socket.IO scale across processes, so it
     # should be on wherever Redis is *reachable* - not merely wherever a URL is
     # configured. Pointed at a Redis that is not running, python-socketio retries
@@ -173,6 +171,26 @@ def _init_extensions(app: Flask) -> None:
             cors_allowed_origins=app.config.get("SOCKETIO_CORS_ALLOWED_ORIGINS") or [],
             manage_session=False,
         )
+
+    # Imported *after* `init_app`, and this ordering is load-bearing.
+    #
+    # `socketio.init_app` builds a fresh server object and assigns it to
+    # `socketio.server`. The `@socketio.on(...)` decorators in `realtime.events`
+    # attach handlers to whatever `socketio.server` is at the moment they run, so
+    # importing that module first registers every handler on the throwaway server
+    # from the SocketIO() constructor - and `init_app` then replaces it with one
+    # that has none.
+    #
+    # The result is a socket server that accepts every connection, authenticated
+    # or not, and answers none of them: no handshake authentication, so no
+    # presence, no `message:send`, no typing, no read receipts. Chat still worked,
+    # because the REST path was always there as a fallback - which is exactly why
+    # this went unnoticed. Verified by hand:
+    #
+    #     socketio.server.handlers['/']   ->  {}      # no handlers at all
+    #
+    # `test_handshake_registers_the_user` is the regression test.
+    from .realtime import events as _events  # noqa: F401  (registers handlers)
 
     origins = app.config.get("CORS_ORIGINS") or []
     cors.init_app(
