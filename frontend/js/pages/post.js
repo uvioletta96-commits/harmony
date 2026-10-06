@@ -78,7 +78,16 @@ export async function render({ id }) {
   // A single post on its own page should not repeat the permalink.
   card.querySelector('.post-actions')?.lastElementChild?.remove();
 
+  // The composer and the list live in separate containers on purpose.
+  // `loadComments` clears the list to render a fresh page of results, and the
+  // composer used to sit in that same node: it was inserted before the first
+  // load and destroyed by it, so a signed-in reader got "no comments yet" and
+  // no box to type in. Anything that rebuilds the list must leave the composer
+  // alone, so it cannot be a child of what gets cleared.
   const commentsHost = el('div', { id: 'comments' });
+  const composerSlot = el('div', { id: 'comment-composer' });
+  const commentList = el('div', { id: 'comment-list' });
+  commentsHost.append(composerSlot, commentList);
   container.append(card, commentsHost);
   shell.append(container);
 
@@ -89,7 +98,7 @@ export async function render({ id }) {
   const loadComments = async ({ append = false } = {}) => {
     if (state.loading || (state.done && append)) return;
     state.loading = true;
-    if (!append) commentsHost.append(loadingRow(t('Загружаем комментарии…')));
+    if (!append) commentList.append(loadingRow(t('Загружаем комментарии…')));
 
     try {
       const params = new URLSearchParams({ sort: state.sort });
@@ -97,11 +106,11 @@ export async function render({ id }) {
 
       const data = await api.get(`/posts/${post.id}/comments?${params}`);
       const comments = Array.isArray(data) ? data : data;
-      commentsHost.querySelector('.loading-row')?.remove();
-      if (!append) clear(commentsHost);
+      commentList.querySelector('.loading-row')?.remove();
+      if (!append) clear(commentList);
 
       if (!comments.length && !append) {
-        commentsHost.append(
+        commentList.append(
           emptyState({
             iconName: 'comment',
             title: t('Пока нет комментариев'),
@@ -110,15 +119,15 @@ export async function render({ id }) {
           }),
         );
       } else {
-        if (!append) commentsHost.append(commentsHeader(state));
+        if (!append) commentList.append(commentsHeader(state));
         for (const comment of comments) {
-          commentsHost.append(renderComment(comment));
+          commentList.append(renderComment(comment));
         }
         state.cursor = comments.__meta?.next_cursor || null;
         state.done = !comments.__meta?.has_more;
 
         if (state.done && comments.length) {
-          commentsHost.append(
+          commentList.append(
             el('p', { class: 'text-center text-muted text-sm', style: { padding: 'var(--space-4)' }, text: t('Это все комментарии') }),
           );
         } else if (!state.done) {
@@ -130,12 +139,12 @@ export async function render({ id }) {
               loadComments({ append: true });
             },
           });
-          commentsHost.append(el('div', { class: 'text-center', style: { padding: 'var(--space-3)' } }, more));
+          commentList.append(el('div', { class: 'text-center', style: { padding: 'var(--space-3)' } }, more));
         }
       }
     } catch (error) {
-      commentsHost.querySelector('.loading-row')?.remove();
-      commentsHost.append(alert({ variant: 'danger', text: error.message }));
+      commentList.querySelector('.loading-row')?.remove();
+      commentList.append(alert({ variant: 'danger', text: error.message }));
     } finally {
       state.loading = false;
     }
@@ -180,7 +189,7 @@ export async function render({ id }) {
         state.sort = value;
         state.cursor = null;
         state.done = false;
-        clear(commentsHost);
+        clear(commentList);
         loadComments();
       },
     }, label);
@@ -188,7 +197,7 @@ export async function render({ id }) {
   /* --- Composer -------------------------------------------------------- */
 
   if (currentUser) {
-    commentsHost.insertBefore(buildCommentBox(null), commentsHost.firstChild);
+    composerSlot.append(buildCommentBox(null));
   }
 
   function buildCommentBox(parent) {
@@ -229,9 +238,10 @@ export async function render({ id }) {
           const host = document.getElementById(`comment-${parent.id}`);
           host?.append(renderComment(result.comment));
         } else {
-          commentsHost.querySelector('.empty')?.remove();
-          commentsHost.querySelectorAll('.comments-head').forEach((node) => node.remove());
-          commentsHost.insertBefore(renderComment(result.comment), commentsHost.children[1] || null);
+          commentList.querySelector('.empty')?.remove();
+          commentList.querySelectorAll('.comments-head').forEach((node) => node.remove());
+          // Straight after the composer, which is the first child of the host.
+          commentsHost.insertBefore(renderComment(result.comment), commentList);
           // Refocused so a reader writing several comments in a row does not
           // have to reach for the field again.
           area.focus();
