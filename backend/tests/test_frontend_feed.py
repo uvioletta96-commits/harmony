@@ -90,7 +90,26 @@ def test_playback_stops_when_leaving_the_page(source):
 
     Not hypothetical: this was the failure the first version of this file's header
     comment was written to prevent, and the only thing that catches it is `unmount`.
+
+    Checked as a sequence rather than by matching one shape of code: the teardown
+    block grew a second arrow function when the gesture bindings moved out of the
+    delegated handlers, so a test that pinned one `teardown.push` would have started
+    failing for a reason that has nothing to do with playback.
     """
     assert re.search(r"export function unmount\b", source)
-    teardown = re.search(r"teardown\.push\(\(\) => \{(.*?)\}\);", source, re.S)
-    assert teardown and "stopPlayback" in teardown.group(1)
+
+    unmount = re.search(r"export function unmount\b(.*?)\n}", source, re.S)
+    assert unmount, "no unmount() to inspect"
+    body = unmount.group(1)
+    assert "teardown" in body, "unmount() does not run the teardown list"
+    assert "stopPlayback()" in body, "unmount() leaves the clip playing"
+
+    # And every teardown entry is inspected together, because there are now more
+    # than one and a test that only looked at the first would pass while the
+    # playback stop moved to a second block.
+    assert len(re.findall(r"teardown\.push\(", source)) >= 1
+    pushes = re.findall(r"teardown\.push\(\s*(?:\(\) => \{(.*?)\}|(\w+))\s*\)", source, re.S)
+    bodies = " ".join(block or name for block, name in pushes)
+    assert "stopPlayback" in bodies, (
+        "no teardown entry stops playback, so unmount() has nothing to run"
+    )

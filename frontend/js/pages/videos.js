@@ -31,7 +31,7 @@ import { t } from '../core/i18n.js';
 
 import api from '../core/api.js';
 import { clear, el } from '../core/dom.js';
-import { compactNumber, plural } from '../core/format.js';
+import { compactNumber, pluralIndex as pluralIndexFor } from '../core/format.js';
 import { icon } from '../core/icons.js';
 import store from '../core/store.js';
 import toast from '../core/toast.js';
@@ -238,10 +238,11 @@ export async function render() {
       const meta = await Promise.resolve(posts.__meta);
 
       for (const post of posts) {
-        const slide = feedSlide(post, currentUser, { onActivity: syncPlaybackToScroll });
+        const slide = feedSlide(post, currentUser);
         if (!slide) continue;
         scroller.append(slide);
         slides.push(slide);
+        bindSlideGestures(slide);
       }
 
       state.cursor = meta?.next_cursor || null;
@@ -282,6 +283,15 @@ export async function render() {
       state.loading = false;
     }
   };
+
+  // Gestures are bound to each stage as it is built rather than delegated from the
+  // scroller. See `bindSlideGestures` for why the delegation was wrong.
+  const tapState = { at: 0, slide: null };
+  const boundListeners = new Map();
+  teardown.push(() => {
+    for (const slide of slides) unbindSlideGestures(slide);
+    boundListeners.clear();
+  });
 
   // Prefetch when the reader is within one screen of the end. Not at the end:
   // waiting until they are already there shows a spinner in the middle of a
@@ -346,22 +356,57 @@ export async function render() {
   scroller.addEventListener('keydown', onKeyDown);
   teardown.push(() => scroller.removeEventListener('keydown', onKeyDown));
 
-  // A double tap likes, the way it does in every video feed - and it only fires
-  // on a genuine double tap, not on two fast taps that were meant to pause.
-  let lastTap = 0;
-  scroller.addEventListener('dblclick', (event) => {
-    event.preventDefault();
-    const slide = event.target.closest('.videos-slide');
-    if (slide) burstHeart(slide);
-  });
-  scroller.addEventListener('click', (event) => {
-    const now = Date.now();
-    const quick = now - lastTap < 280;
-    lastTap = now;
-    if (quick) return; // handled by dblclick
-    const slide = event.target.closest('.videos-slide');
-    if (slide && !event.target.closest('.videos-actions, .videos-meta a')) return;
-  });
+  // A double tap likes. Bound to the *stage*, not delegated from the scroller: the
+  // stage is what a reader aims at, and a scroller-level handler has to work out
+  // which slide was hit by walking back up from the target - which is how a double
+  // tap on a button both likes the post and presses the button.
+  //
+  // `tapState` is shared across slides on purpose: a double tap that straddles two
+  // screens should still read as one gesture, and a reader's finger does not know
+  // where the slide boundary is.
+  function bindSlideGestures(slide) {
+    const stage = slide.querySelector('.videos-stage');
+    if (!stage) return;
+    const bound = { stage, onClick: null, onDblClick: null };
+
+    bound.onClick = (event) => {
+      // `detail === 2` is the second click of a pair. Letting it through would
+      // pause the clip the double tap just liked.
+      if (event.detail === 2) return;
+      tapState.at = Date.now();
+      tapState.slide = slide;
+      togglePlayback(stage);
+    };
+    bound.onDblClick = (event) => {
+      event.preventDefault();
+      tapState.at = 0;
+      burstHeart(slide);
+    };
+    stage.addEventListener('click', bound.onClick);
+    stage.addEventListener('dblclick', bound.onDblClick);
+    boundListeners.set(stage, bound);
+  }
+
+  function unbindSlideGestures(slide) {
+    const stage = slide.querySelector('.videos-stage');
+    const bound = boundListeners.get(stage);
+    if (!bound) return;
+    stage.removeEventListener('click', bound.onClick);
+    stage.removeEventListener('dblclick', bound.onDblClick);
+    boundListeners.delete(stage);
+  }
+
+  function togglePlayback(stage) {
+    const video = stage.querySelector('video');
+    if (!video) return;
+    if (video.paused) {
+      video.dataset.userPaused = '0';
+      play(video);
+    } else {
+      video.dataset.userPaused = '1';
+      stopPlayback();
+    }
+  }
 
   // A post published from anywhere lands here. Not prepended: the reader is
   // mid-feed, and a screen appearing above them would move what they are
@@ -422,7 +467,7 @@ export function unmount() {
  * those out, but a file can fail to load after the fact, and a blank slide with no
  * explanation is worse than one less screen.
  */
-function feedSlide(post, currentUser, { onActivity } = {}) {
+function feedSlide(post, currentUser) {
   const attachment = (post.media || [])[0];
   if (!attachment) return null;
 
@@ -448,18 +493,10 @@ function feedSlide(post, currentUser, { onActivity } = {}) {
     video.dataset.userPaused = '0';
 
     const badge = el('span', { class: 'videos-play-badge', 'aria-hidden': 'true' }, icon('play', { size: 26 }));
+    // No click handler here. `bindSlideGestures` owns taps and double taps on the
+    // stage, because they have to be distinguished from each other - a pause here
+    // and a like there would mean a double tap both likes and pauses.
     stage = el('div', { class: 'videos-stage' }, video, badge);
-    stage.addEventListener('click', () => {
-      const currentVideo = stage.querySelector('video');
-      if (currentVideo.paused) {
-        currentVideo.dataset.userPaused = '0';
-        play(currentVideo);
-      } else {
-        currentVideo.dataset.userPaused = '1';
-        stopPlayback();
-      }
-      onActivity?.();
-    });
   } else {
     // No `loading="lazy"`. That was wrong, and measurably so.
     //
@@ -490,8 +527,6 @@ function feedSlide(post, currentUser, { onActivity } = {}) {
     // it should not pretend to pause something that is not playing.
     stage = el('div', { class: 'videos-stage' }, image);
   }
-
-  stage.addEventListener('dblclick', (event) => event.preventDefault());
 
   const likeButton = feedAction({
     iconName: 'heart',
@@ -603,14 +638,17 @@ function feedSlide(post, currentUser, { onActivity } = {}) {
         views > 0
           ? el('p', { class: 'videos-stats' },
               icon('eye', { size: 14 }),
-              // The forms are translated; the number goes in afterwards because
-              // `plural` selects a form, it does not interpolate one.
+              // Each plural form is a whole phrase, not a bare noun with the number
+              // prepended. Assembling `${n} ${plural(...)}` from separately
+              // translated pieces fixes the word order for one language and breaks
+              // it for the eleven others: in Arabic the number follows the noun, and
+              // nothing in the app can reorder it afterwards.
               el('span', {
-                text: `${compactNumber(views)} ${plural(views, [
-                  t('просмотр'),
-                  t('просмотра'),
-                  t('просмотров'),
-                ])}`,
+                text: [
+                  t('{v0} просмотр', { v0: String(views) }),
+                  t('{v0} просмотра', { v0: String(views) }),
+                  t('{v0} просмотров', { v0: String(views) }),
+                ][pluralIndex(views)],
               }),
             )
           : null,
@@ -625,17 +663,28 @@ function feedSlide(post, currentUser, { onActivity } = {}) {
         commentCount > 0
           ? el('p', {
               class: 'videos-teaser',
-              text: `${commentCount} ${plural(commentCount, [
-                t('комментарий'),
-                t('комментария'),
-                t('комментариев'),
-              ])}`,
+              // Whole phrases again, for the same reason as the view count.
+              text: [
+                t('{v0} комментарий', { v0: String(commentCount) }),
+                t('{v0} комментария', { v0: String(commentCount) }),
+                t('{v0} комментариев', { v0: String(commentCount) }),
+              ][pluralIndex(commentCount)],
             })
           : null,
       ),
     ),
     el('div', { class: 'videos-actions' }, likeButton, commentButton, shareButton, moreButton),
   );
+}
+
+/**
+ * Which of the three plural forms to use.
+ *
+ * A thin alias so the two call sites read the same as each other; the rule lives
+ * in `core/format.js` next to `plural`, so the two cannot drift apart.
+ */
+function pluralIndex(count) {
+  return pluralIndexFor(count, 3);
 }
 
 function feedAction({ iconName, action, label, count = 0, active = false, onClick }) {

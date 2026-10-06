@@ -62,6 +62,29 @@ export function plural(count, forms) {
   return list[index] ?? list[list.length - 1] ?? String(count);
 }
 
+/**
+ * The index of the plural form to use, for a UI with exactly three forms.
+ *
+ * Exists because `plural()` returns a string and the vertical feed needs the
+ * index: each of its forms has to be a whole translatable *phrase*, not a noun
+ * with the number prepended. Assembling `${n} ${plural(n, ['comment', ...])}`
+ * fixes the word order for one language and breaks it for the others - in Arabic
+ * the number follows the noun, and nothing can reorder it afterwards.
+ *
+ * CLDR names six categories and this UI has three forms, so the mapping is
+ * `zero`/`one` -> 0, `two`/`few`/`many` -> 1, everything else -> 2. The same
+ * collapse `plural()` performs when a language names fewer forms than are
+ * supplied, so the two agree about which form was picked.
+ */
+export function pluralIndex(count, formCount = 3) {
+  let category = rules().select(Math.abs(Number(count) || 0));
+  if (!CATEGORIES.includes(category)) category = 'other';
+  const collapsed = CATEGORIES.indexOf(category);
+  const buckets = formCount === 2 ? [[0, 1], [5]] : [[0, 1], [2, 3, 4], [5]];
+  const index = buckets.findIndex((bucket) => bucket.includes(collapsed));
+  return index < 0 ? formCount - 1 : Math.min(index, formCount - 1);
+}
+
 /** The active language as a BCP 47 tag, for the Intl date formatters. */
 export function locale() {
   return currentLanguage();
