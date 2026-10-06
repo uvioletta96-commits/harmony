@@ -43,6 +43,15 @@ import { router } from '../core/router.js';
 /** How far ahead to fetch, in screens. One is enough to cover the swipe. */
 const PREFETCH_AHEAD = 1;
 
+/**
+ * How long a single tap waits to see whether it is the first half of a double tap.
+ *
+ * Roughly the platform's own double-click interval. If it is much shorter, a real
+ * double tap pauses *and* likes; if it is much longer, a single tap feels laggy -
+ * which is worse than the mistake it prevents, so the bias is towards pausing.
+ */
+const DOUBLE_TAP_MS = 300;
+
 /** Tabs across the top. `photo` is the same feed for stills. */
 const KINDS = [
   { value: 'video', label: () => t('Видео') },
@@ -286,9 +295,16 @@ export async function render() {
 
   // Gestures are bound to each stage as it is built rather than delegated from the
   // scroller. See `bindSlideGestures` for why the delegation was wrong.
-  const tapState = { at: 0, slide: null };
+  // One pending-tap timer for the whole feed, not one per slide: the gestures are
+  // alternatives, and a reader who double taps does not expect both halves of it to
+  // resolve independently.
+  const tapState = { timer: null };
   const boundListeners = new Map();
   teardown.push(() => {
+    // A pending pause that is never cancelled would fire after the page is gone,
+    // touching a detached node.
+    if (tapState.timer) clearTimeout(tapState.timer);
+    tapState.timer = null;
     for (const slide of slides) unbindSlideGestures(slide);
     boundListeners.clear();
   });
@@ -369,17 +385,31 @@ export async function render() {
     if (!stage) return;
     const bound = { stage, onClick: null, onDblClick: null };
 
-    bound.onClick = (event) => {
-      // `detail === 2` is the second click of a pair. Letting it through would
-      // pause the clip the double tap just liked.
-      if (event.detail === 2) return;
-      tapState.at = Date.now();
-      tapState.slide = slide;
-      togglePlayback(stage);
+    // A single tap pauses and a double tap likes, and the two gestures overlap for
+    // the first few hundred milliseconds - so the pause cannot be applied on the
+    // first click or every double tap would also pause.
+    //
+    // It is deferred by one tap interval instead. `dblclick` cancels the pending
+    // pause, so a double tap only likes; a single tap pauses a moment later, which
+    // is imperceptible and is the same trick every video feed uses. Trying to infer
+    // it from `event.detail` alone does not work: the first click of a pair already
+    // arrives with `detail === 1`.
+    bound.onClick = () => {
+      if (tapState.timer) {
+        clearTimeout(tapState.timer);
+        tapState.timer = null;
+      }
+      tapState.timer = setTimeout(() => {
+        tapState.timer = null;
+        togglePlayback(stage);
+      }, DOUBLE_TAP_MS);
     };
     bound.onDblClick = (event) => {
       event.preventDefault();
-      tapState.at = 0;
+      if (tapState.timer) {
+        clearTimeout(tapState.timer);
+        tapState.timer = null;
+      }
       burstHeart(slide);
     };
     stage.addEventListener('click', bound.onClick);

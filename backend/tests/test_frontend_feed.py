@@ -85,6 +85,59 @@ def test_fullscreen_hides_the_sites_own_chrome(source):
     assert block and "display: none" in block.group(1)
 
 
+def test_a_double_tap_does_not_also_pause(source):
+    """The two gestures overlap for the first few hundred milliseconds.
+
+    So the pause has to be deferred past the double-tap window, not applied on the
+    first click. Measured on the deployed site with the per-slide binding: the heart
+    appeared and the clip stopped, which means a double tap both liked *and*
+    paused - the reader has to tap twice more just to get sound back.
+
+    `event.detail` cannot be used to tell them apart: the first click of a real pair
+    already arrives with `detail === 1`. Only a deferred decision works, cancelled
+    by the `dblclick` that follows.
+    """
+    handler = re.search(r"bound\.onClick = \(\) => \{(.*?)\n    \};", source, re.S)
+    assert handler, "the click handler does not defer its decision"
+
+    body = handler.group(1)
+    assert "setTimeout" in body, (
+        "the pause fires on the first click, so every double tap also pauses - and "
+        "event.detail cannot be used instead, because the first click of a pair "
+        "already arrives with detail 1"
+    )
+
+    dbl = re.search(r"bound\.onDblClick = \(event\) => \{(.*?)\n    \};", source, re.S)
+    assert dbl, "no double-tap handler to cancel the pending pause"
+
+    # The guard matters as much as the call. `if (false) clearTimeout(...)` still
+    # contains `clearTimeout`, and the pending pause is never cancelled - which is
+    # the bug this test exists for, and which a presence-only check reports as
+    # fixed. Verified by making the guard constant and watching the test pass anyway.
+    body = dbl.group(1)
+    assert "clearTimeout(tapState.timer)" in body, (
+        "dblclick does not cancel the pending pause, so a double tap pauses as well "
+        "as liking"
+    )
+    # The guard matters as much as the call: `if (false) clearTimeout(...)` still
+    # contains `clearTimeout`, and the pause is never cancelled. Checked by making
+    # the guard constant and watching this test fail - a presence-only check
+    # reported that broken version as fixed.
+    assert re.search(r"if \(\s*!?\w+\.timer\s*\)\s*\{\s*clearTimeout\(\w+\.timer\)", body), (
+        "the cancel is not guarded on the pending timer, so it never runs"
+    )
+
+
+def test_the_deferred_pause_is_cleared_on_teardown(source):
+    """A pending pause that is never cancelled fires after the page is gone, and
+    touches a node that is no longer in the document."""
+    teardown_block = re.search(r"teardown\.push\(\(\) => \{(.*?)\n  \}\);", source, re.S)
+    assert teardown_block, "no teardown block"
+    assert "clearTimeout" in teardown_block.group(1), (
+        "teardown does not clear the pending-tap timer"
+    )
+
+
 def test_playback_stops_when_leaving_the_page(source):
     """Sound continuing with nothing on screen.
 
