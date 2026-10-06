@@ -339,7 +339,17 @@
   gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
-.profile-identity { flex: 1; min-width: 0; }
+.profile-identity {
+  flex: 1;
+  /* A floor, not zero. The actions row below refuses to shrink and its
+     buttons never wrap their labels, so on a narrow screen this column was
+     left with roughly one character of width - and `overflow-wrap: anywhere`
+     on the name then rendered it one letter per line, which is what a profile
+     with three buttons in the header looked like on a phone. Eight rem is
+     wide enough for a name and narrow enough that the actions still fit or
+     wrap. */
+  min-width: 8rem;
+}
 .profile-name {
   font-size: var(--text-xl);
   font-weight: 500;
@@ -379,7 +389,14 @@
 .profile-meta a { color: var(--text-muted); border-bottom: 1px solid var(--border); }
 .profile-meta a:hover { color: var(--text-secondary); border-color: var(--stone-500); }
 
-.profile-actions { display: flex; gap: var(--space-2); flex-shrink: 0; }
+/* Wrappable, so the row can give way instead of crushing the name beside it.
+   `justify-content: flex-end` keeps the buttons right-aligned when they do fit
+   on one line. */
+.profile-actions { display: flex; gap: var(--space-2); flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+/* `nowrap` on `.btn` is right everywhere else - a label that wraps mid-word in
+   a toolbar is worse than a wide button. Here the button competes with a name
+   for the same row, so it has to be allowed to give way. */
+.profile-actions .btn { white-space: normal; text-align: center; }
 
 .profile-stats {
   display: flex;

@@ -831,6 +831,17 @@
   flex-wrap: wrap;
 }
 .composer-toolbar > * { flex: 0 0 auto; }
+/* The comment and reply composer reuses this toolbar but has no avatar column,
+   so the 52px indent is empty space - and on a phone that is a fifth of the
+   width, which squeezed the field and pushed the send button to the edge. */
+#comment-composer .composer-toolbar,
+.reply-box .composer-toolbar { padding-left: 0; }
+/* "Ctrl + Enter" is advice for a keyboard. On a touch screen there is no Ctrl,
+   and the line it occupies is width the send button needs. */
+@media (pointer: coarse) {
+  #comment-composer .composer-toolbar .hint,
+  .reply-box .composer-toolbar .hint { display: none; }
+}
 .composer-tools { display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; min-width: 0; }
 .composer-actions { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
 
