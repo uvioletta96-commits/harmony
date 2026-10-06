@@ -239,9 +239,13 @@ export async function render({ id }) {
           host?.append(renderComment(result.comment));
         } else {
           commentList.querySelector('.empty')?.remove();
-          commentList.querySelectorAll('.comments-head').forEach((node) => node.remove());
-          // Straight after the composer, which is the first child of the host.
-          commentsHost.insertBefore(renderComment(result.comment), commentList);
+          // Into the list, at the top - not next to it. Inserting relative to
+          // `commentList` put the new comment between the composer and the
+          // list: it rendered, but outside the container the list reloads and
+          // the count reads from, so nothing downstream saw it and it vanished
+          // on the next sort change. Confirmed on the deployed server: the
+          // comment was in the DOM and not in `#comment-list`.
+          commentList.prepend(renderComment(result.comment));
           // Refocused so a reader writing several comments in a row does not
           // have to reach for the field again.
           area.focus();
