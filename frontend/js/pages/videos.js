@@ -461,15 +461,30 @@ function feedSlide(post, currentUser, { onActivity } = {}) {
       onActivity?.();
     });
   } else {
+    // No `loading="lazy"`. That was wrong, and measurably so.
+    //
+    // A slide is built one screen ahead of the reader, which is the whole reason
+    // lazy loading looked right here - there is no point decoding a photo three
+    // screens away. But `loading="lazy"` defers to the browser's own viewport
+    // estimate, and that estimate does not understand a snap scroller: it measures
+    // against the layout viewport, and the slide is inside a nested scroller whose
+    // content extends past it. So the first screen - the one the reader is looking
+    // at - stayed at `naturalWidth 0`, a blank rectangle with an alt text on it,
+    // indefinitely. Verified on the deployed site: the bytes arrived with a 200 and
+    // decoded fine as a detached image, but the one on screen never loaded.
+    //
+    // `decoding="async"` is kept, because deferring the *decode* does not defer
+    // deciding to fetch, and it is decode that makes scrolling stutter. The images
+    // are already dimension-capped at 2560px by the upload service.
     const image = el('img', {
       class: 'videos-clip videos-still',
       src: attachment.url,
       alt: attachment.alt_text || post.body || t('Фото'),
-      // `loading="lazy"`: a slide is built a screen ahead, and decoding three
-      // full-resolution photos the reader has not reached is the difference
-      // between a smooth scroll and a stutter.
-      loading: 'lazy',
       decoding: 'async',
+      // Width and height from the server's recorded dimensions, so the box is the
+      // right shape before the bytes arrive and the caption does not jump.
+      width: attachment.width || undefined,
+      height: attachment.height || undefined,
     });
     // A photo screen has no play state, so the badge is never shown - and tapping
     // it should not pretend to pause something that is not playing.
