@@ -33,6 +33,22 @@ git -C "$APP" reset --hard origin/main
 git -C "$APP" clean -fdq -e .venv -e .env
 git -C "$APP" log --oneline -1
 
+# Scripts that systemd runs by path have to be executable, and git only records the
+# executable bit if it was set when the file was added. When it was not, the file
+# lands 0644 and the unit fails 203/EXEC on every run with a correct-looking path -
+# which is what happened to the nightly backup, for two days, silently.
+#
+# `git ls-files --stage` is the authority here rather than the filesystem: after the
+# `reset --hard` above, the file exists with whatever mode was committed. Mode
+# 100755 is executable, 100644 is not.
+for script in "$APP/deploy/bin/backup.sh"; do
+  [ -f "$script" ] || continue
+  if [ "$(git -C "$APP" ls-files --stage "$script" | awk '{print $1}')" = "100644" ]; then
+    echo "  $script is committed without the executable bit; setting it here"
+    chmod 0755 "$script"
+  fi
+done
+
 # Replace this script with the one in the repository it just pulled, then run
 # that. Without this the copy on the server drifts from the copy in the repo and
 # nothing says so: a deploy script that cannot deploy itself is a deploy script

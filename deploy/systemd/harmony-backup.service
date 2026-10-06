@@ -20,6 +20,16 @@ WorkingDirectory=/home/harmony/harmony/backend
 # reads. A tracked file is one `git clean` cannot touch, and putting the unit and
 # the script in the repository together means a fresh server can be built from
 # what is reviewed here rather than from whatever happened to be on the box.
+#
+# The file must also be executable. Git tracks the executable bit, but only when
+# it was set at `git add` time; when it was not, the script is committed 0644 and
+# every run fails 203/EXEC with a perfectly correct path in `systemctl show`,
+# which reads like a working unit and is not one. That is not hypothetical - it is
+# the state this very deploy produced. `deploy-server.sh` chmods it for exactly
+# this reason; this comment is why that line exists rather than looking arbitrary.
+#
+# There is no way to fix it inside the unit: an ExecStartPre= cannot run before
+# the exec that has already failed.
 ExecStart=/home/harmony/harmony/deploy/bin/backup.sh
 
 # A backup that fails is not a backup. Previously the failure was only visible in
