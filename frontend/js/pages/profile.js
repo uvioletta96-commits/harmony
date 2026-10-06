@@ -12,6 +12,30 @@ import store, { patchCurrentUser } from '../core/store.js';
 import toast from '../core/toast.js';
 import { router } from '../core/router.js';
 import { avatar, button, setLoading, statGrid, emptyState, errorState, skeletonRows, loadingRow, menu, alert } from '../components/ui.js';
+
+/**
+ * Open a direct conversation with somebody, creating it if needed.
+ *
+ * `POST /conversations` is idempotent - it returns the existing thread rather
+ * than a duplicate - so this is safe to press twice, and it is the only call
+ * site in the frontend. Without it there is no way to start a conversation at
+ * all: the messages page can only list and open threads that already exist.
+ */
+async function startConversation(userPublicId, trigger) {
+  if (!store.get('currentUser')) {
+    router.navigate('/login');
+    return;
+  }
+  setLoading(trigger, true);
+  try {
+    const data = await api.post('/conversations', { user_id: userPublicId });
+    router.navigate(`/chat/${data.conversation.id}`);
+  } catch (error) {
+    toast.error(error.message);
+  } finally {
+    setLoading(trigger, false);
+  }
+}
 import { reportDialog, confirmDialog } from '../components/report.js';
 
 export async function render({ username }) {
@@ -111,7 +135,14 @@ export async function render({ username }) {
             iconName: 'file',
             title: isSelf ? t('Вы ещё ничего не опубликовали') : t('Пока нет публикаций'),
             text: isSelf ? t('Первая запись — самая простая.') : null,
-            action: isSelf ? button(t('Написать'), { variant: 'primary', size: 'sm', onClick: () => router.navigate('/') }) : null,
+            // The "write" action belongs on somebody *else's* profile - it is the only
+            // way to start a conversation. It used to be the other way round:
+            // shown on your own profile, where it navigated to the feed, and
+            // absent everywhere else, so there was no route into a new
+            // conversation at all.
+            action: isSelf
+              ? button(t('Написать пост'), { variant: 'primary', size: 'sm', onClick: () => router.navigate('/?compose=1') })
+              : null,
           }),
         );
         return;
@@ -218,6 +249,16 @@ function buildHeader(profile, stats, relationship, { isSelf, canModerate, curren
   if (isSelf) {
     actions.append(button(t('Изменить профиль'), { variant: 'secondary', size: 'sm', onClick: () => router.navigate('/settings/profile') }));
   } else if (currentUser) {
+    // Writing a message is the point of visiting somebody else's profile. It
+    // belongs next to "follow", and it is the only entry point into a new
+    // conversation in the whole interface.
+    actions.append(
+      button(t('Написать сообщение'), {
+        variant: 'primary',
+        size: 'sm',
+        onClick: (event) => startConversation(profile.public_id, event.currentTarget),
+      }),
+    );
     actions.append(followButton(profile, relationship));
     if (canModerate) {
       actions.append(
