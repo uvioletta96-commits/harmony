@@ -190,3 +190,65 @@ class TestPeopleDirectory:
         newcomer = make_user(username="justarrived")
         names = [row["username"] for row in user_service.suggestions_for(user, limit=20)]
         assert newcomer.username in names
+
+
+class TestHostileQueryParameters:
+    """Every endpoint that reads a number out of the query string.
+
+    `int("abc")` raises ValueError inside a view. The error handler turns an
+    unhandled exception into a 500, so a typo in a query parameter arrives as a
+    server crash - indistinguishable, to the client, from the site being down.
+    """
+
+    def test_user_search_rejects_a_non_numeric_limit(self, guest_client):
+        assert_error(guest_client.get("/api/v1/users/search?q=lt3000&limit=abc"), status=422)
+
+    def test_user_search_rejects_a_non_numeric_offset(self, guest_client):
+        assert_error(guest_client.get("/api/v1/users/search?q=lt3000&offset=abc"), status=422)
+
+    def test_user_search_rejects_a_float_limit(self, guest_client):
+        """`int("1.5")` raises rather than truncating, and silently answering 1
+        would be worse than refusing."""
+        assert_error(guest_client.get("/api/v1/users/search?q=lt3000&limit=1.5"), status=422)
+
+    def test_user_search_rejects_a_negative_offset(self, guest_client):
+        assert_error(guest_client.get("/api/v1/users/search?q=lt3000&offset=-1"), status=422)
+
+    def test_post_search_validates_the_limit_it_does_take(self, guest_client):
+        """Post search is cursor-paginated and takes no `offset`, so `offset=abc`
+        is an unknown parameter and is ignored rather than rejected - which is the
+        right answer for a parameter the endpoint never defined. What it must not
+        do is accept a bad `limit`."""
+        assert_error(guest_client.get("/api/v1/posts/search?q=abc&limit=abc"), status=422)
+
+    def test_a_valid_limit_still_works(self, guest_client, other_user):
+        rows = assert_ok(guest_client.get(f"/api/v1/users/search?q={other_user.username}&limit=5"))
+        assert [row["username"] for row in rows] == [other_user.username]
+
+    def test_an_absent_limit_still_takes_the_default(self, guest_client, other_user):
+        rows = assert_ok(guest_client.get(f"/api/v1/users/search?q={other_user.username}"))
+        assert [row["username"] for row in rows] == [other_user.username]
+
+    def test_a_null_byte_in_a_handle_is_not_a_crash(self, guest_client):
+        """PostgreSQL's driver refuses a NUL in a string literal:
+
+            ValueError: A string literal cannot contain NUL (0x00) characters.
+
+        which was a 500. A handle containing one cannot exist, so 404 - the same
+        answer as any handle nobody has taken."""
+        response = guest_client.get("/api/v1/users/by-username/lt3000%00")
+
+        assert response.status_code in (400, 404), response.status_code
+        assert response.get_json()["error"]["code"] != "validation_failed"
+
+    def test_control_characters_in_a_handle_are_refused(self, guest_client):
+        from app.utils.query import has_control_characters
+
+        assert has_control_characters("a\x00b")
+        assert has_control_characters("a\nb")
+        assert has_control_characters("a\tb")
+        assert has_control_characters("a\x7fb")
+        # Cyrillic, emoji and a long ordinary handle must pass.
+        assert not has_control_characters("Алекс")
+        assert not has_control_characters("sail_run")
+        assert not has_control_characters("a" * 64)

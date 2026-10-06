@@ -15,6 +15,7 @@ from ..models.user import UserRole, UserStatus
 from ..security.decorators import admin_required, moderator_required, verify_csrf
 from ..security.validators import Schema
 from ..services import moderation_service, post_service, user_service
+from ..utils.query import int_arg
 from ..utils.responses import NotFoundError, ValidationError, ok
 
 bp = Blueprint("admin", __name__)
@@ -93,8 +94,8 @@ def queue():
         g.current_user,
         status=request.args.get("status", ReportStatus.OPEN.value),
         target_type=request.args.get("target_type"),
-        page=int(request.args.get("page", 1) or 1),
-        per_page=int(request.args.get("per_page", 25) or 25),
+        page=int_arg("page", default=1),
+        per_page=int_arg("per_page", default=25),
     )
     return ok(page.items, meta=page.to_meta({"status": request.args.get("status", ReportStatus.OPEN.value)}))
 
@@ -209,8 +210,8 @@ def list_users():
     query = query.order_by(User.created_at.desc())
     page = offset_page(
         query,
-        page=int(request.args.get("page", 1) or 1),
-        page_size=int(request.args.get("per_page", 25) or 25),
+        page=int_arg("page", default=1),
+        page_size=int_arg("per_page", default=25),
         serialize=lambda u: {
             **u.to_public_dict(None),
             "status": u.status,
@@ -349,8 +350,8 @@ def set_status(public_id: str):
 def action_history():
     page = moderation_service.action_history(
         subject_id=request.args.get("subject_id", type=int),
-        page=int(request.args.get("page", 1) or 1),
-        per_page=int(request.args.get("per_page", 25) or 25),
+        page=int_arg("page", default=1),
+        per_page=int_arg("per_page", default=25),
     )
     return ok(page.items, meta=page.to_meta())
 
@@ -369,8 +370,8 @@ def audit_log():
         query = query.filter(AuditLog.action == action)
     page = offset_page(
         query,
-        page=int(request.args.get("page", 1) or 1),
-        page_size=int(request.args.get("per_page", 50) or 50),
+        page=int_arg("page", default=1),
+        page_size=int_arg("per_page", default=50),
         serialize=lambda a: a.to_dict(),
     )
     return ok(page.items, meta=page.to_meta())

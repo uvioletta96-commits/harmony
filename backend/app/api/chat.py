@@ -12,6 +12,7 @@ from ..security.decorators import auth_required, verify_csrf
 from ..security.rate_limit import enforce
 from ..security.validators import Schema
 from ..services import chat_service, user_service
+from ..utils.query import int_arg
 from ..utils.responses import NotFoundError, created, no_content, ok
 
 bp = Blueprint("chat", __name__)
@@ -28,8 +29,8 @@ send_schema = Schema().string("body", required=False, max_length=4000, allow_new
 def list_conversations():
     rows = chat_service.list_conversations(
         g.current_user,
-        limit=int(request.args.get("limit", 30) or 30),
-        offset=int(request.args.get("offset", 0) or 0),
+        limit=int_arg("limit", default=30),
+        offset=int_arg("offset", default=0),
     )
     return ok({"conversations": rows, "total_unread": chat_service.total_unread(g.current_user)})
 

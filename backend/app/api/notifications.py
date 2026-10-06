@@ -7,6 +7,7 @@ from flask import Blueprint, g, request
 from ..security.decorators import auth_required, verify_csrf
 from ..security.rate_limit import enforce
 from ..services import notification_service
+from ..utils.query import int_arg
 from ..utils.responses import ok
 
 bp = Blueprint("notifications", __name__)
@@ -20,7 +21,7 @@ def list_notifications():
         g.current_user,
         unread_only=(request.args.get("unread") == "1"),
         cursor=request.args.get("cursor"),
-        limit=int(request.args.get("limit", 30) or 30),
+        limit=int_arg("limit", default=30),
     )
     return ok(
         page.items,

@@ -9,6 +9,7 @@ from ..security.decorators import auth_optional, auth_required
 from ..security.rate_limit import enforce
 from ..services import auth_service, search_service, user_service
 from ..utils.logging import get_logger, log_event
+from ..utils.query import has_control_characters, int_arg
 from ..utils.responses import NotFoundError, ValidationError, created, ok
 
 logger = get_logger("harmony.api.users")
@@ -37,9 +38,14 @@ def search():
     """Search users by username, name or bio."""
     enforce("search:query")
     query = (request.args.get("q") or "").strip()
-    limit = request.args.get("limit", 20)
-    offset = request.args.get("offset", 0)
-    page = search_service.search_users(_viewer(), query, limit=int(limit or 20), offset=int(offset or 0))
+    # Was `int(limit or 20)`, which raises ValueError on `?limit=abc` and turns a
+    # typo into a 500. `int_arg` answers 422 and says which parameter was wrong.
+    page = search_service.search_users(
+        _viewer(),
+        query,
+        limit=int_arg("limit", default=20, minimum=1, maximum=50),
+        offset=int_arg("offset", default=0, minimum=0),
+    )
     return ok(page.items, meta=page.to_meta())
 
 
@@ -73,7 +79,14 @@ def get_profile_by_username(username: str):
 
     Profile URLs use usernames because they are memorable and stable across
     account renames; internal ids are never exposed.
+
+    A handle carrying a NUL byte cannot exist and would raise inside the driver
+    on the way to PostgreSQL, so it is answered as the unknown handle it is.
+    404 rather than 422: from here the two are indistinguishable, and a URL that
+    names nothing is not a malformed request so much as a dead one.
     """
+    if has_control_characters(username):
+        raise NotFoundError("Профиль не найден.", code="user_not_found")
     user = auth_service.get_by_username(username)
     if user is None:
         raise NotFoundError("Профиль не найден.", code="user_not_found")
@@ -132,8 +145,8 @@ def user_comments(public_id: str):
     )
     page = offset_page(
         query,
-        page=int(request.args.get("page", 1) or 1),
-        page_size=int(request.args.get("limit", 20) or 20),
+        page=int_arg("page", default=1),
+        page_size=int_arg("limit", default=20),
         serialize=lambda c: c.to_dict(_viewer()),
     )
     return ok(page.items, meta=page.to_meta({"user": user.to_public_dict(_viewer())}))
@@ -170,7 +183,7 @@ def unfollow(public_id: str):
 def followers(public_id: str):
     user = user_service.get_visible_user(public_id, _viewer())
     rows = user_service.list_followers(
-        user, limit=int(request.args.get("limit", 50) or 50), offset=int(request.args.get("offset", 0) or 0)
+        user, limit=int_arg("limit", default=50), offset=int_arg("offset", default=0)
     )
     return ok({"users": [row.to_public_dict(_viewer()) for row in rows]})
 
@@ -180,7 +193,7 @@ def followers(public_id: str):
 def following(public_id: str):
     user = user_service.get_visible_user(public_id, _viewer())
     rows = user_service.list_following(
-        user, limit=int(request.args.get("limit", 50) or 50), offset=int(request.args.get("offset", 0) or 0)
+        user, limit=int_arg("limit", default=50), offset=int_arg("offset", default=0)
     )
     return ok({"users": [row.to_public_dict(_viewer()) for row in rows]})
 

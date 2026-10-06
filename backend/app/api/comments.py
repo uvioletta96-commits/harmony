@@ -8,6 +8,7 @@ from ..security.decorators import auth_optional, auth_required, verify_csrf
 from ..security.rate_limit import enforce
 from ..security.validators import Schema
 from ..services import comment_service, post_service
+from ..utils.query import int_arg
 from ..utils.responses import created, no_content, ok
 
 bp = Blueprint("comments", __name__)
@@ -113,8 +114,8 @@ def list_replies(comment_id: str):
     )
     page = offset_page(
         query,
-        page=int(request.args.get("page", 1) or 1),
-        page_size=int(request.args.get("limit", 30) or 30),
+        page=int_arg("page", default=1),
+        page_size=int_arg("limit", default=30),
         serialize=lambda c: c.to_dict(_viewer()),
     )
     return ok(page.items, meta=page.to_meta({"root_id": comment.public_id}))
