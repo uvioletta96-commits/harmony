@@ -237,13 +237,22 @@ class BaseConfig:
     # documents the product's real third-party surface instead of hiding it
     # behind a relaxed ``default-src``.
     #
-    # Intended end state: self-host the font and the socket.io client, then
-    # delete these lists. The policy is already strict enough to allow it.
-    CSP_SCRIPT_SRC: ClassVar[list[str]] = ["https://cdn.socket.io"]
+    # Intended end state: self-host the font too, then delete these lists. The
+    # policy is already strict enough to allow it.
+    #
+    # cdn.socket.io used to be here. It is gone because the Socket.IO client is
+    # now vendored under frontend/vendor/: a chat that silently degrades to REST
+    # because a CDN was slow is not a working chat, and the whole realtime layer
+    # - chat delivery, live comments, online presence - hung off one <script> tag
+    # pointing at someone else's uptime.
+    CSP_SCRIPT_SRC: ClassVar[list[str]] = []
     CSP_STYLE_SRC: ClassVar[list[str]] = ["https://fonts.googleapis.com"]
     CSP_FONT_SRC: ClassVar[list[str]] = ["https://fonts.gstatic.com"]
-    CSP_CONNECT_SRC: ClassVar[list[str]] = ["https://cdn.socket.io"]
-    CSP_SCRIPT_SELF_SRC: ClassVar[list[str]] = ["https://cdn.jsdelivr.net"]
+    CSP_CONNECT_SRC: ClassVar[list[str]] = []
+    # Was jsdelivr. Nothing in the frontend referenced it any more, and an
+    # origin allowed to serve script is an origin whose outage or compromise
+    # takes the site down - so an unused entry here is pure downside.
+    CSP_SCRIPT_SELF_SRC: ClassVar[list[str]] = []
     #: Serve the frontend bundle and uploads from the application itself. Only
     #: the development profile enables this; production is nginx's job.
     SERVE_FRONTEND: bool = False

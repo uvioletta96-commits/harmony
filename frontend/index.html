@@ -37,7 +37,18 @@
     </noscript>
   </div>
 
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <!-- Socket.IO client, vendored rather than fetched from cdn.socket.io.
+       It was the only thing standing between the site and a working chat: the
+       client library is loaded by a plain <script> tag, so if the CDN is slow,
+       blocked, offline or simply gone, `window.io` is undefined, `connect()`
+       returns null, and the whole realtime layer - chat delivery, live comments,
+       online presence - falls back to REST without a word on screen. A core
+       feature should not depend on someone else's uptime.
+
+       v4.7.5, MIT, (c) Guillermo Rauch. Byte-identical to the release:
+       sha256 73eba16bc895fdfa454e27ecb80def31ede8d861f99e175ff93b110eabec044f
+       Keep the version in this comment and the copy in sync. -->
+  <script src="/vendor/socket.io.min.js"></script>
   <script type="module" src="/js/main.js"></script>
 </body>
 </html>

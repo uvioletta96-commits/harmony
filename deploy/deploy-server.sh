@@ -73,9 +73,11 @@ index, stamp = sys.argv[1], sys.argv[2]
 with open(index, encoding="utf-8") as handle:
     html = handle.read()
 
-# Local assets only. The Google Fonts and Socket.IO URLs carry their own
-# versions and are not ours to repoint.
-pattern = r'(?P<head>(?:href|src)=")/(?P<path>(?:js|css|assets)/[^"?]+)(?P<tail>[^"]*")'
+# Local assets only. The Google Fonts URLs carry their own versions and are not
+# ours to repoint; everything we ship lives under the stamped directory, vendor
+# bundles included - a pinned third-party file is exactly as immutable as our
+# own, and giving it a year-long cache is correct.
+pattern = r'(?P<head>(?:href|src)=")/(?P<path>(?:js|css|assets|vendor)/[^"?]+)(?P<tail>[^"]*")'
 html, count = re.subn(
     pattern,
     lambda m: f'{m.group("head")}/{stamp}/{m.group("path")}{m.group("tail")}',

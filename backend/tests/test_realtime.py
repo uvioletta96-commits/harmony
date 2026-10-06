@@ -19,6 +19,8 @@ updates that never arrive. Found on the deployed server while testing comments:
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 from flask import Flask, request
 
@@ -263,3 +265,75 @@ def test_presence_appears_in_the_search_payload(app, make_user, registry, auth_a
 
     assert found, "the connected account should appear in its own search results"
     assert found[0]["is_online"] is True
+
+# ---------------------------------------------------------------------------
+# Self-hosting
+#
+# The Socket.IO client used to be fetched from cdn.socket.io by a plain
+# <script> tag. `connect()` bails out - returning null and logging one warning -
+# when `window.io` is missing, so every realtime feature degraded to REST polling
+# with nothing on screen to say so. Presence was the visible symptom: nobody ever
+# showed as online because nobody was ever connected.
+#
+# These assert the dependency is gone rather than merely unused, because a script
+# tag that points nowhere is exactly the thing that would come back.
+# ---------------------------------------------------------------------------
+
+FRONTEND = pathlib.Path(__file__).resolve().parents[2] / "frontend"
+INDEX = FRONTEND / "index.html"
+VENDORED_CLIENT = FRONTEND / "vendor" / "socket.io.min.js"
+#: sha256 of the socket.io client 4.7.5 release, as downloaded from cdn.socket.io.
+#: Pinned because a vendored bundle can otherwise be hand-edited without any
+#: test noticing, and a modified Socket.IO client is not reviewable by reading it.
+VENDORED_CLIENT_SHA256 = "73eba16bc895fdfa454e27ecb80def31ede8d861f99e175ff93b110eabec044f"
+
+
+def _script_sources() -> list[str]:
+    import re
+
+    html = INDEX.read_text(encoding="utf-8")
+    return re.findall(r'<script[^>]*\bsrc="([^"]+)"', html)
+
+
+def test_index_html_loads_no_third_party_scripts():
+    """An external script tag is remote code for every visitor, run with the
+    page's origin and the session cookie."""
+    sources = _script_sources()
+
+    assert sources, "precondition: index.html loads at least one script"
+    external = [src for src in sources if not src.startswith("/")]
+    assert external == [], f"third-party script tags: {external}"
+
+
+def test_the_socket_io_client_is_vendored_and_shipped():
+    """Pointing at a local path only works if the file is actually in the repo."""
+    sources = _script_sources()
+    socket_tags = [src for src in sources if "socket.io" in src]
+
+    assert socket_tags == ["/vendor/socket.io.min.js"], socket_tags
+    assert VENDORED_CLIENT.is_file(), f"{VENDORED_CLIENT} is referenced but missing"
+    head = VENDORED_CLIENT.read_text(encoding="utf-8")[:400]
+    assert "Socket.IO" in head
+    assert "MIT License" in head, "redistributing it needs its licence header intact"
+
+
+def test_the_vendored_client_is_the_released_file():
+    import hashlib
+
+    digest = hashlib.sha256(VENDORED_CLIENT.read_bytes()).hexdigest()
+
+    assert digest == VENDORED_CLIENT_SHA256, (
+        "frontend/vendor/socket.io.min.js is not the pinned 4.7.5 release. "
+        "Re-download it and update the sha256 in frontend/index.html."
+    )
+
+
+def test_csp_no_longer_carves_out_the_socket_cdn(app):
+    """With the bundle local there is no reason for the policy to name the CDN,
+    and the entry would be a hole with no door left in it."""
+    header = app.test_client().get("/").headers["Content-Security-Policy"]
+    script_src = next(d for d in header.split("; ") if d.startswith("script-src"))
+
+    assert script_src.strip() == "script-src 'self'", script_src
+    assert "cdn.socket.io" not in header
+    assert "cdn.jsdelivr.net" not in script_src
