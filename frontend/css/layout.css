@@ -390,9 +390,9 @@
 .profile-meta a:hover { color: var(--text-secondary); border-color: var(--stone-500); }
 
 /* Wrappable, so the row can give way instead of crushing the name beside it.
-   `justify-content: flex-end` keeps the buttons right-aligned when they do fit
-   on one line. */
-.profile-actions { display: flex; gap: var(--space-2); flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+   `max-width` because `flex-shrink: 0` means wrapping alone is not enough: a
+   row wider than its container wraps internally and still overflows the card. */
+.profile-actions { display: flex; gap: var(--space-2); flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
 /* `nowrap` on `.btn` is right everywhere else - a label that wraps mid-word in
    a toolbar is worse than a wide button. Here the button competes with a name
    for the same row, so it has to be allowed to give way. */

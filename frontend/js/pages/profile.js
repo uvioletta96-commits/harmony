@@ -298,7 +298,7 @@ function buildHeader(profile, stats, relationship, { isSelf, canModerate, curren
 
   header.append(
     el('div', { class: 'profile-top' },
-      avatar(profile, { size: '2xl', link: false }),
+      avatar(profile, { size: '2xl', link: false, showOnline: true }),
       el('div', { class: 'profile-identity' },
         el('h1', { class: 'profile-name' },
           profile.display_name || profile.username,

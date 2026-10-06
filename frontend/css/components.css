@@ -463,6 +463,8 @@
 
 /* Presence dot */
 .avatar-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+/* Presence. Hidden unless the account is online: a grey dot on every avatar is
+   decoration that means nothing, so the element only exists when it is true. */
 .avatar-dot {
   position: absolute;
   right: 0;
@@ -470,11 +472,10 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--text-faint);
+  background: var(--text);
   border: 2px solid var(--bg-raised);
   transition: background-color var(--duration-base) var(--ease-out);
 }
-.avatar-dot.is-online { background: #5c7f6b; }
 
 /* Avatar stack for overlapping faces */
 .avatar-stack { display: flex; }

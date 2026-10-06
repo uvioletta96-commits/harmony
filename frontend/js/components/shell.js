@@ -386,7 +386,7 @@ function buildRail(host) {
           for (const person of data.people.slice(0, 4)) {
             peopleHost.append(
               el('a', { class: 'rail-person', href: `/u/${person.username}` },
-                avatar(person, { size: 'sm', link: false }),
+                avatar(person, { size: 'sm', link: false, showOnline: true }),
                 el('div', { style: { minWidth: '0' } },
                   el('div', { class: 'name truncate', text: person.display_name || person.username }),
                   el('div', { class: 'meta truncate', text: t('{v0} подписчиков', { v0: compactNumber(person.followers_count || 0) }) }),

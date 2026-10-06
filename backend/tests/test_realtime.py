@@ -100,3 +100,166 @@ def test_the_regression_is_what_we_think_it_is(bare_app):
         # With both, it works - and that is the combination the helpers use.
         emit("post:created", {"id": "abc"}, namespace="/", broadcast=True)
         assert request.path == "/ping"
+
+# ---------------------------------------------------------------------------
+# Presence
+#
+# The online dot on an avatar had a rule in CSS the whole time and nothing that
+# ever applied it, so no account - connected or not - ever showed one. The dot is
+# driven by `User.to_public_dict()["is_online"]`, which reads the live socket
+# registry. Two things have to hold, and the second is easy to get wrong:
+#
+#   1. an account holding a socket reads as online;
+#   2. an account that turned its last-seen time off reads as offline even while
+#      it is connected.
+#
+# (2) is not a nicety. "Last seen two hours ago" and "online right now" are the
+# same disclosure, so honouring `show_last_seen` for one and not the other hands
+# the setting straight back to anyone who watches an avatar instead of a
+# timestamp.
+# ---------------------------------------------------------------------------
+
+
+def _connect(user, sid: str = "sid-1") -> None:
+    """Seed the socket registry the way `manager.register` does.
+
+    Not by calling `register`: that also calls flask_socketio's `join_room`,
+    which reads `flask.request.sid` and so needs a live Socket.IO handler behind
+    it. Presence only reads the registry, so this writes the same entry
+    `register` would and leaves the room bookkeeping alone. `test_presence_...`
+    below is about what the registry says, not about joining rooms.
+    """
+    from app.realtime.manager import _connections, user_room
+
+    _connections[sid] = {"user_id": user.id, "username": user.username,
+                         "rooms": {user_room(user.id)}}
+
+
+def _disconnect(sid: str = "sid-1") -> None:
+    from app.realtime.manager import unregister
+
+    unregister(sid)
+
+
+@pytest.fixture()
+def registry(app):
+    """A clean socket registry around each test.
+
+    The registry is module-level process state, not per-test state, so a
+    connection left open by one test would make an unrelated account look online
+    in the next one.
+    """
+    from app.realtime.manager import clear_registry
+
+    clear_registry()
+    yield
+    clear_registry()
+
+
+def test_a_connected_account_reads_as_online(app, make_user, registry):
+    viewer = make_user()
+    target = make_user()
+    _connect(target)
+
+    assert target.to_public_dict(viewer)["is_online"] is True
+    assert viewer.to_public_dict(target)["is_online"] is False
+
+
+def test_a_disconnected_account_reads_as_offline(app, make_user, registry):
+    from datetime import UTC, datetime
+
+    viewer = make_user()
+    target = make_user()
+    # Recently seen, to prove the dot is not derived from `last_seen_at`.
+    target.last_seen_at = datetime.now(UTC)
+
+    assert target.to_public_dict(viewer)["is_online"] is False
+
+
+def test_hiding_last_seen_also_hides_presence(app, make_user, registry):
+    """The bug this guards: a live dot on an account that asked not to be seen."""
+    viewer = make_user()
+    private = make_user(show_last_seen=False)
+    _connect(private)
+
+    assert private.is_usable_account, "precondition: the account is otherwise usable"
+    assert private.to_public_dict(viewer)["is_online"] is False
+
+
+def test_presence_does_not_leak_a_private_profile(app, make_user, registry):
+    """A private profile is not readable by a non-follower, so it cannot be
+    observed to be online either."""
+    from app.extensions import db
+    from app.models.user import ProfileVisibility
+
+    viewer = make_user()
+    target = make_user()
+    target.profile_visibility = ProfileVisibility.PRIVATE.value
+    db.session.commit()
+    _connect(target)
+
+    assert target.to_public_dict(viewer)["is_online"] is False
+    # And a follower, who may read the profile, does see the dot.
+    assert target.to_public_dict(target)["is_online"] is True
+
+
+def test_a_guest_sees_the_dot_on_a_public_profile(app, make_user, registry):
+    """Gating on a signed-in viewer would hide every dot from signed-out
+    readers - which is most of the sign-up page and the whole guest feed."""
+    target = make_user()
+    _connect(target)
+
+    assert target.to_public_dict(None)["is_online"] is True
+
+
+def test_two_tabs_of_one_account_stay_online_when_one_closes(app, make_user, registry):
+    """One tab closing is not the person logging off."""
+    viewer = make_user()
+    target = make_user()
+    _connect(target, "sid-a")
+    _connect(target, "sid-b")
+
+    assert target.to_public_dict(viewer)["is_online"] is True
+    _disconnect("sid-a")
+    assert target.to_public_dict(viewer)["is_online"] is True
+    _disconnect("sid-b")
+    assert target.to_public_dict(viewer)["is_online"] is False
+
+
+def test_a_banned_account_never_reads_as_online(app, make_user, registry):
+    from app.extensions import db
+    from app.models.user import UserStatus
+
+    viewer = make_user()
+    target = make_user()
+    target.status = UserStatus.BANNED.value
+    db.session.commit()
+    _connect(target)
+
+    assert target.to_public_dict(viewer)["is_online"] is False
+
+
+def test_is_online_agrees_with_the_dict(app, make_user, registry):
+    """The helper and the serialised field must not drift apart."""
+    target = make_user()
+    _connect(target)
+
+    from app.realtime.manager import is_online
+
+    assert is_online(target.id) is True
+    assert is_online(target.id + 100_000) is False
+
+
+def test_presence_appears_in_the_search_payload(app, make_user, registry, auth_api):
+    """The dot is only useful if the field survives the API, so check the route
+    rather than the model."""
+    target = make_user(display_name="Presence Target")
+    _connect(target)
+
+    rows = auth_api(make_user()).get(
+        "/api/v1/users/search", query_string={"q": "Presence"}
+    ).get_json()["data"]
+    found = [row for row in rows if row["username"] == target.username]
+
+    assert found, "the connected account should appear in its own search results"
+    assert found[0]["is_online"] is True

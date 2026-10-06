@@ -47,7 +47,11 @@ export function avatar(user, { size = 'md', link = true, showOnline = false } = 
 }
 
 function wrapWithPresence(node, user) {
-  return el('div', { class: 'avatar-wrap' }, node, el('span', { class: 'avatar-dot', 'aria-hidden': 'true' }));
+  // Only when the account is actually online. The dot used to be added for
+  // everybody, which meant it either sat there in a colour that meant nothing
+  // or had to be hidden in CSS - either way it never said who was here.
+  if (!user.is_online) return node;
+  return el('div', { class: 'avatar-wrap' }, node, el('span', { class: 'avatar-dot is-online', 'aria-hidden': 'true' }));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -686,7 +690,7 @@ export function tabs({ items, active, onChange }) {
 
 export function personRow(person, { action = null, subtitle = null } = {}) {
   return el('div', { class: 'person-card' },
-    avatar(person),
+    avatar(person, { showOnline: true }),
     el('div', { class: 'info' },
       el('div', { class: 'name' },
         el('a', { href: `/u/${encodeURIComponent(person.username)}` }, person.display_name || person.username),

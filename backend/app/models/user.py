@@ -303,6 +303,26 @@ class User(SerializerMixin, db.Model, PrimaryKeyMixin, PublicIdMixin, TimestampM
             return False
         return not viewer.is_restricted
 
+    def is_visible_online_for(self, viewer: User | None) -> bool:
+        """Whether ``viewer`` is allowed to see that this account is connected.
+
+        Three gates, in order: the account must be usable at all, the viewer must
+        be allowed to read the profile, and the owner must not have hidden their
+        last-seen time. The last gate matters - presence is live, but a grey
+        "last seen" dot on a public profile and a black dot on the same profile
+        leak the same fact, and someone who turned that off asked not to be.
+
+        Imported here rather than at module scope: the realtime manager imports
+        the app's extensions, and the models are imported by nearly everything.
+        """
+        if not self.is_usable_account or not self.show_last_seen:
+            return False
+        if not self.can_be_viewed_by(viewer):
+            return False
+        from ..realtime.manager import is_online
+
+        return is_online(self.id)
+
     def to_public_dict(self, viewer: User | None = None) -> dict[str, Any]:
         """Safe representation. Never leaks the email, counters or moderation state."""
         data: dict[str, Any] = {
@@ -323,6 +343,12 @@ class User(SerializerMixin, db.Model, PrimaryKeyMixin, PublicIdMixin, TimestampM
             "following_count": self.following_count,
             "comments_count": self.comments_count,
             "created_at": iso(self.created_at),
+            # Presence is read from the live socket registry, not stored: it is
+            # true while a socket is held and stops being true the moment it
+            # closes. A user who opted out of showing their last-seen time is
+            # not readable to this viewer, so they read as offline - presence
+            # would otherwise be a way around that setting.
+            "is_online": self.is_visible_online_for(viewer),
         }
         if self.show_last_seen and self.last_seen_at:
             data["last_seen_at"] = iso(self.last_seen_at)

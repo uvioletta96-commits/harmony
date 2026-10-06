@@ -111,6 +111,17 @@ def online_user_ids() -> list[int]:
     return sorted({entry["user_id"] for entry in _connections.values()})
 
 
+def is_online(user_id: int) -> bool:
+    """Whether this account currently holds at least one socket.
+
+    O(connections) rather than O(1), which is the wrong shape for something
+    called once per user per response. It stays a scan because callers ask about
+    a single account: building a set of every id for every avatar in a page of
+    results would be the larger cost.
+    """
+    return any(entry["user_id"] == user_id for entry in _connections.values())
+
+
 def connection_count() -> int:
     return len(_connections)
 
@@ -128,6 +139,7 @@ __all__ = [
     "emit_global",
     "emit_to_conversation",
     "emit_to_user",
+    "is_online",
     "online_user_ids",
     "register",
     "remove_from_conversation",
