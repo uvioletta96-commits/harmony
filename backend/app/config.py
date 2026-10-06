@@ -231,6 +231,16 @@ class BaseConfig:
     READY_PATH: str = "/readyz"
     SLOW_REQUEST_MS: int = env_int("SLOW_REQUEST_MS", 1200)
 
+    #: Where the nightly backup writes its dumps. Unset means no backup is
+    #: configured for this deployment - a laptop, CI, a preview - and /readyz says
+    #: "disabled" rather than inventing an age. Only the server sets it.
+    #:
+    #: It is read on every /readyz because a backup has no user waiting on it and
+    #: no request that fails when it stops happening. The nightly job failed for
+    #: two days with the timer still reporting `active (waiting)`; this is what
+    #: makes that visible to a deploy, which already calls the endpoint.
+    BACKUP_DIR: str | None = env("BACKUP_DIR") or None
+
     # --- Content Security Policy -----------------------------------------
     # The sources ``frontend/index.html`` actually loads, granted per directive.
     # Keeping them explicit means a grant can be reviewed and removed, and it

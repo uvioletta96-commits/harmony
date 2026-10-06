@@ -149,6 +149,24 @@ case "$ws" in
   *)  printf '  %-10s FAILED\n' "chat"; fail=1 ;;
 esac
 
+say "last backup"
+# Checked on every deploy because nothing else checks it. The nightly job failed
+# with 203/EXEC for two days - `ExecStart` named a script `git clean -fd` had
+# removed - and the only symptom was `systemctl list-timers` saying
+# `active (waiting)`, which reads like a healthy job. /readyz reports the age, so
+# the failure is visible at the one moment somebody is definitely looking.
+BACKUP_FIELD=$(curl -sS -m 15 http://127.0.0.1/readyz \
+  | "$PY" -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["checks"].get("backup", {})))' \
+  2>/dev/null || echo '{}')
+printf '  %s\n' "$BACKUP_FIELD"
+case "$BACKUP_FIELD" in
+  *'"status": "stale"'*|*'"status": "error"'*|*'"status": "no_dumps_yet"'*)
+    printf '  WARNING: the nightly backup is not healthy. Data is not being protected.\n'
+    printf '           systemctl status harmony-backup.service\n'
+    printf '           journalctl -u harmony-backup.service --since "-2 days"\n'
+    ;;
+esac
+
 say "recent errors, if any"
 # -q: the deploy user cannot read the whole journal, and without this the
 # notice about that is the loudest thing in the output.

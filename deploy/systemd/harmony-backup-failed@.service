@@ -1,0 +1,17 @@
+[Unit]
+Description=Mark the Harmony nightly backup as failed (%i)
+Documentation=https://github.com/uvioletta96-commits/harmony
+
+[Service]
+Type=oneshot
+# Deliberately dependency-free: no mail client, no network, no database. It runs
+# at 04:20 when something has already gone wrong, and the one thing it must do is
+# not also go wrong.
+#
+# It writes a marker file that /readyz reports on. That is the whole mechanism:
+# the backup failed at 04:20, and by the time anyone opens the dashboard at 09:00
+# the readiness probe says so in one field, instead of the failure living only in
+# `systemctl status` output nobody reads. The two days of missed backups this
+# exists to prevent were invisible for exactly that reason - the timer said
+# `active (waiting)`, which reads like a healthy job.
+ExecStart=/bin/sh -c 'date -u +%%s > /home/harmony/harmony-data/backups/LAST_FAILURE_EPOCH; echo "harmony backup FAILED at $(date -u)" >&2'

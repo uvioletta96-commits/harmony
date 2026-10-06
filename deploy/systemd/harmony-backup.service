@@ -1,0 +1,31 @@
+[Unit]
+Description=Harmony nightly backup and retention
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=harmony
+Group=harmony
+WorkingDirectory=/home/harmony/harmony/backend
+# No StandardOutput=append: systemd creates that file as root before the
+# service drops privileges, so every write from the script then fails and the
+# job exits non-zero having taken no dump. The script keeps its own log.
+#
+# The path points *into the git working tree* on purpose, and that is the whole
+# point of it being here rather than only on the server. It used to name
+# /home/harmony/harmony/bin/backup.sh, which was never committed, so `git clean
+# -fdq` in deploy-server.sh deleted the untracked directory on the next deploy
+# and every nightly run died with 203/EXEC - a failure systemd logs and nobody
+# reads. A tracked file is one `git clean` cannot touch, and putting the unit and
+# the script in the repository together means a fresh server can be built from
+# what is reviewed here rather than from whatever happened to be on the box.
+ExecStart=/home/harmony/harmony/deploy/bin/backup.sh
+
+# A backup that fails is not a backup. Previously the failure was only visible in
+# `systemctl status`, and the timer still reported `active (waiting)` - which is
+# exactly the state that let two days of missed backups go unnoticed. These make
+# the failure surface: the unit goes visibly failed, and OnFailure gives a place
+# to hang an alert.
+SuccessExitStatus=0
+OnFailure=harmony-backup-failed@%n.service

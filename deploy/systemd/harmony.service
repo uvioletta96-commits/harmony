@@ -1,0 +1,30 @@
+[Unit]
+Description=Harmony web (gunicorn + socket.io)
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+Requires=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=harmony
+Group=harmony
+WorkingDirectory=/home/harmony/harmony/backend
+Environment="PATH=/home/harmony/harmony/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/home/harmony/harmony/.venv/bin/gunicorn \
+  --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker \
+  --workers 1 \
+  --bind 127.0.0.1:8000 \
+  --timeout 120 \
+  --graceful-timeout 30 \
+  --access-logfile - \
+  --error-logfile - \
+  --log-level info \
+  wsgi:app
+Restart=always
+RestartSec=5
+TimeoutStopSec=45
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
