@@ -198,6 +198,60 @@ def test_a_double_tap_does_not_also_pause(source):
 
 
 
+def test_the_scroller_is_the_offset_parent_for_its_slides():
+    """`offsetTop` is measured from the nearest *positioned* ancestor, and the
+    scroller was not one.
+
+    Measured on the deployed site: the first slide reported `offsetTop: 195`
+    while `scrollTop` started at 0. "Nearest slide to the middle of the viewport"
+    was therefore comparing a scroll-relative number against a page-relative one
+    and was wrong by the height of the header - so it named the current screen
+    incorrectly for the whole scroll, and named it differently three times per
+    swipe.
+
+    The JS now uses `getBoundingClientRect`, which puts both sides in one
+    coordinate system. This rule makes `offsetTop` correct as well, so the two
+    cannot be used inconsistently by a later change.
+    """
+    css = CSS.read_text(encoding="utf-8")
+    rule = re.search(r"\.videos-scroller \{(.*?)\n\}", css, re.S)
+    assert rule, "no .videos-scroller rule"
+    assert "position: relative" in rule.group(1), (
+        "the scroller is not the offset parent for its slides, so a slide's "
+        "offsetTop is measured from the page rather than from the scroll position"
+    )
+
+
+def test_the_current_screen_is_measured_in_one_coordinate_system(source):
+    """Both sides of the "which slide is current" comparison must be viewport
+    coordinates.
+
+    Mixing `offsetTop` with `scrollTop` is the bug this pins: it looks cheaper,
+    reads identically on the first slide, and is wrong by the height of the header
+    on every one of them.
+    """
+    sync = re.search(r"const syncPlaybackToScroll = \(\) => \{(.*?)\n  \};", source, re.S)
+    assert sync, "no syncPlaybackToScroll to inspect"
+    body = sync.group(1)
+
+    assert "getBoundingClientRect" in body, (
+        "the current screen is not measured with getBoundingClientRect, so it "
+        "compares offsetTop (page-relative) against scrollTop (scroll-relative)"
+    )
+
+    # Comments are stripped first: the block explains this very bug and names both
+    # properties, so a presence check on the raw text reports the fix as broken.
+    code = re.sub(r"//[^\n]*|/\*.*?\*/", "", body, flags=re.S)
+    assert "offsetTop" not in code, (
+        "offsetTop is page-relative unless the scroller is positioned; use "
+        "getBoundingClientRect so the answer does not depend on that"
+    )
+    assert "scrollTop" not in code, (
+        "scrollTop is scroll-relative and must not be mixed with a viewport "
+        "measurement"
+    )
+
+
 def test_scrolling_does_not_restart_the_current_clip(source):
     """The bug the reader reported: the sound cutting and restarting over and over.
 

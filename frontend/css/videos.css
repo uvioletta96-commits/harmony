@@ -140,6 +140,13 @@
   flex: 1;
   min-height: 0; /* so it can be shorter than its content */
   overflow-y: auto;
+  /* The offset parent for its slides.
+     Without this, a slide's `offsetTop` is measured from the page rather than from
+     the scroller, so anything comparing it against `scrollTop` is comparing two
+     different coordinate systems. The feed used to do exactly that, and the
+     "which screen is the reader on" answer was wrong by the height of the header -
+     which meant the clip restarted three times per swipe. */
+  position: relative;
   scroll-snap-type: y mandatory;
   /* The first and last screens have nothing beyond them, and handing the gesture
      to whatever is behind the feed makes the end of the list feel loose. */

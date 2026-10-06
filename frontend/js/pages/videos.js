@@ -229,12 +229,26 @@ export async function render() {
   /** Play whichever clip is nearest the middle, and only that one. */
   const syncPlaybackToScroll = () => {
     if (!slides.length) return;
-    const middle = scroller.scrollTop + scroller.clientHeight / 2;
+
+    // Viewport coordinates for both sides of the comparison.
+    //
+    // `offsetTop` looks cheaper and is wrong: it is measured from the nearest
+    // *positioned* ancestor, and the scroller is not one - the page is. On the
+    // deployed site the first slide reported `offsetTop: 195` while `scrollTop`
+    // started at 0, so "nearest slide to the middle of the viewport" was comparing
+    // a scroll-relative number against a page-relative one. It flipped three times
+    // during a single screen of scrolling, and every flip restarted the clip.
+    //
+    // `getBoundingClientRect` puts both in the same coordinate system, which is the
+    // only property that matters here. One rAF-coalesced pass over the slides is
+    // affordable; being wrong is not.
+    const viewport = scroller.getBoundingClientRect();
+    const middle = viewport.top + viewport.height / 2;
     let best = null;
     let bestDistance = Infinity;
     for (const slide of slides) {
-      const centre = slide.offsetTop + slide.offsetHeight / 2;
-      const distance = Math.abs(centre - middle);
+      const rect = slide.getBoundingClientRect();
+      const distance = Math.abs(rect.top + rect.height / 2 - middle);
       if (distance < bestDistance) {
         bestDistance = distance;
         best = slide;
@@ -242,17 +256,9 @@ export async function render() {
     }
     if (!best) return;
 
-    // The whole fix for "the sound restarts over and over" is this early return.
-    //
-    // Every play() call stops whatever was playing first, so a scroll that reaches
-    // this function without needing a change restarts the clip from zero - and
-    // the sound audibly cuts and starts again. Measured on the deployed site: one
-    // screen of scrolling produced 3 plays and 3 pauses, because the nearest-slide
-    // calculation flips as the snap settles. Six seconds of doing nothing produced
-    // none, so the churn is entirely scroll-driven.
-    //
-    // Comparing against `current` rather than the DOM means the work happens once
-    // per screen entered, not once per scroll event.
+    // Once per screen entered, not once per scroll event. `play()` stops whatever
+    // was playing first, so any reach of this function that does not change the
+    // current screen restarts the clip from zero and the sound cuts and restarts.
     if (best === current) return;
 
     for (const slide of slides) slide.classList.toggle('is-current', slide === best);
