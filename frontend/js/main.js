@@ -31,7 +31,7 @@ import * as notFoundPage from './pages/notfound.js';
 
 const PUBLIC_ROUTES = [
   '/', '/login', '/register', '/forgot', '/reset-password', '/verify',
-  '/search', '/terms', '/privacy',
+  '/search', '/videos', '/terms', '/privacy',
 ];
 
 function isPublic(path) {
