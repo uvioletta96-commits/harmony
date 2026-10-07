@@ -481,11 +481,10 @@ function openPlayer(item, media) {
     'aria-label': (item.body || '').trim() || t('Видео'),
   });
 
-  // One video at a time, and it stays up while the shelf behind scrolls on a phone.
+  // One video at a time.
   video.addEventListener('play', () => {
     stopPlayback();
     playing = video;
-    document.body.classList.add('has-player');
   });
 
   // The position, written on a timer rather than on every `timeupdate`, which fires
@@ -623,6 +622,11 @@ function openPlayer(item, media) {
   });
   document.addEventListener('keydown', onKey);
   document.body.style.overflow = 'hidden';
+  // Set when the player *opens*, not when the video plays. It hides the bottom
+  // navigation, and a video that is slow to start - or one whose first frame is
+  // slow to decode - would otherwise show the bar through the overlay for a second
+  // or two, which is exactly when a reader is deciding whether this works.
+  document.body.classList.add('has-player');
   document.body.append(overlay);
   video.focus();
 

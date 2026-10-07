@@ -380,10 +380,36 @@ class TestMobile:
         assert "body.has-player .mobile-nav" in EFIR_CSS, (
             "the bottom bar is drawn under an open player"
         )
-        assert "has-player" in EFIR, "the class the rule keys on is never set"
         assert "classList.add('has-player')" in EFIR
         assert "classList.remove('has-player')" in EFIR, (
             "the class outlives the player, hiding the bottom bar on every later page"
+        )
+
+    def test_the_class_is_set_when_the_player_opens(self):
+        """Not when the video plays.
+
+        It was, and the bar showed through the overlay for as long as the video took
+        to start - which is a second or two on a phone, and exactly when the reader
+        is deciding whether this works. A video that never plays at all, because its
+        codec is unsupported, left the bar visible the whole time.
+        """
+        player = block(EFIR, "function openPlayer(item, media)")
+        assert "classList.add('has-player')" in player
+        # Checked by looking at the `play` listener rather than at the text before
+        # the add: "play" also appears in `playsinline`, in `video.play()` and in
+        # prose, so a substring check over a few hundred characters reports a failure
+        # on correct code.
+        listener = code(block(EFIR, "  video.addEventListener('play', () => {"))
+        assert "has-player" not in listener, (
+            "the class is added by a play handler, so the bottom bar shows through the "
+            "overlay until the video starts - a second or two on a phone, and for "
+            "ever if the codec is unsupported"
+        )
+        open_part = player[
+            player.index("document.body.style.overflow = 'hidden'") : player.index("document.body.append(overlay)")
+        ]
+        assert "classList.add('has-player')" in open_part, (
+            "the class is not added as the player is put on screen"
         )
 
     def test_the_shelves_are_derived_from_this_browser(self):
