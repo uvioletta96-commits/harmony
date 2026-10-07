@@ -158,6 +158,176 @@
 .videos-scroller:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .videos-scroller.is-empty { display: grid; place-items: center; }
 
+/* The seek bar ---------------------------------------------------------------- */
+
+/* Two pixels until a finger is on it.
+ *
+ * A permanent fat bar across the bottom of a full-bleed clip is a permanent
+ * obstruction, and it sits exactly where the caption is. Thin enough to show the
+ * position and to say "there is something here"; it grows under the finger and the
+ * times appear, which is the only moment they are wanted. */
+.videos-scrub {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  padding: var(--space-4) var(--space-3) var(--space-2);
+  cursor: pointer;
+  /* The whole control, not the drawn line. A two-pixel target is a two-pixel target
+     for a thumb, however good it looks. */
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.videos-scrub:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+  border-radius: var(--radius-xs);
+}
+
+.videos-scrub-track {
+  position: relative;
+  display: block;
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.28);
+  transition: height var(--duration-fast) var(--ease-out);
+}
+.videos-scrub-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.9);
+}
+
+.videos-scrub-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 11px;
+  height: 11px;
+  margin-left: -5.5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.45);
+  transform: translateY(-50%) scale(0);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+/* Dragging: the line grows, the thumb appears, the times appear. Together, so the
+   state is legible at a glance - a thumb with no numbers is a thumb with no way to
+   know whether it is seeking. */
+.videos-scrub.is-dragging .videos-scrub-track,
+.videos-scrub:focus-visible .videos-scrub-track { height: 4px; }
+.videos-scrub.is-dragging .videos-scrub-thumb,
+.videos-scrub:focus-visible .videos-scrub-thumb { transform: translateY(-50%) scale(1); }
+
+.videos-scrub-readout {
+  position: absolute;
+  right: var(--space-3);
+  bottom: calc(var(--space-3) + 8px);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.videos-scrub.is-dragging .videos-scrub-readout,
+.videos-scrub:focus-visible .videos-scrub-readout { opacity: 1; }
+
+/* Double-speed badge --------------------------------------------------------- */
+
+/* Shown while a finger is held down. The state is otherwise invisible: a clip at
+   2× looks exactly like a clip at 1×, and a reader who presses and holds and
+   nothing appears to happen will assume the gesture is not supported. */
+.videos-stage.is-held::after,
+.efir-player-frame.is-double::after {
+  content: '2×';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 5;
+  transform: translate(-50%, -50%);
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  background: rgb(0 0 0 / 0.62);
+  color: #fff;
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  animation: double-in 180ms var(--ease-out);
+}
+.efir-rate {
+  position: absolute;
+  z-index: 5;
+  top: var(--space-3);
+  right: var(--space-3);
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  background: rgb(0 0 0 / 0.62);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.efir-player-frame.is-double .efir-rate { opacity: 1; }
+@keyframes double-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* The seek flash -------------------------------------------------------------- */
+
+/* Which way it went, and by how much. A seek with no visible response reads as a
+   dropped frame, and a reader will tap again - and again - until the clip is
+   somewhere they did not ask for. */
+.seek-flash {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  pointer-events: none;
+  animation: seek-flash 620ms var(--ease-out) forwards;
+}
+.seek-flash.is-forward { transform: translate(46%, -50%); }
+.seek-flash.is-back { transform: translate(-46%, -50%); }
+.seek-flash-text { font-size: var(--text-xs); white-space: nowrap; }
+
+@keyframes seek-flash {
+  0%   { opacity: 0; }
+  18%  { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seek-flash { animation: none; opacity: 1; }
+  .videos-stage.is-held::after,
+  .efir-player-frame.is-double::after { animation: none; }
+  .videos-scrub-track,
+  .videos-scrub-thumb,
+  .videos-scrub-readout,
+  .efir-rate { transition: none; }
+}
+
 /* Fullscreen ------------------------------------------------------------------ */
 
 /* A video the browser took fullscreen on its own - which is the only route iOS

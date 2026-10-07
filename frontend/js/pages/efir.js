@@ -33,6 +33,7 @@ import { icon } from '../core/icons.js';
 import { readFlag, writeValue } from '../core/local.js';
 import { avatar, button, emptyState, errorState, loadingRow } from '../components/ui.js';
 import { posterElement } from '../components/posters.js';
+import { doubleTapToSeek, holdToSpeed } from '../components/videoGestures.js';
 import {
   isSaved,
   laterIds,
@@ -573,6 +574,10 @@ function openPlayer(item, media) {
   };
 
   const dismiss = () => {
+    // The rate first. Closing while the reader is still holding leaves the video at
+    // 2× for the next one they open, with nothing on screen saying why.
+    hold.cancel();
+    seek.cancel();
     // Saved before the node goes, and only if there is somewhere to save it to: a
     // video that never loaded has no duration and would store NaN.
     if (video.duration && Number.isFinite(video.duration)) {
@@ -600,6 +605,43 @@ function openPlayer(item, media) {
   }, icon('close', { size: 20 }));
 
   const frame = el('div', { class: 'efir-player-frame' }, video, el('div', { class: 'efir-player-speed' }, speedButton));
+
+  // Hold to run at twice the rate, double tap to seek ten seconds.
+  //
+  // Both live on the frame rather than the video, because the browser's own control
+  // bar is drawn inside the video and a gesture starting on the scrub or the
+  // play button is not a hold - dropping the rate because somebody pressed play
+  // would be worse than not offering the gesture at all.
+  const CONTROLS_ZONE = 0.16;
+  const overControls = (event) => {
+    const bounds = frame.getBoundingClientRect();
+    // Below this line, across the bottom of the frame, is the browser's control bar.
+    const fromBottom = bounds.bottom - (event.clientY || bounds.top);
+    return bounds.height > 0 && fromBottom < bounds.height * CONTROLS_ZONE;
+  };
+
+  const rateBadge = el('span', { class: 'efir-rate', 'aria-hidden': 'true' }, el('span', { text: '2×' }));
+  frame.append(rateBadge);
+
+  const hold = holdToSpeed(frame, {
+    video,
+    own: (event) => !overControls(event) && !event.target.closest('.efir-speed'),
+    onStart: () => frame.classList.add('is-double'),
+  });
+
+  const seek = doubleTapToSeek(frame, {
+    video,
+    own: (event) => !overControls(event),
+    onSeek: () => {
+      // A seek is an action the reader took; a view is counted once per screen and
+      // this does not change that.
+    },
+  });
+
+  teardown.push(() => {
+    hold.cancel();
+    seek.cancel();
+  });
   const info = el('div', { class: 'efir-player-info' },
     el('div', { class: 'efir-player-title', text: title }),
     el('div', { class: 'efir-player-meta' },

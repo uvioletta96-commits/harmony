@@ -31,7 +31,7 @@ import { t } from '../core/i18n.js';
 
 import api from '../core/api.js';
 import { clear, el } from '../core/dom.js';
-import { compactNumber, pluralIndex as pluralIndexFor } from '../core/format.js';
+import { compactNumber, formatDuration, pluralIndex as pluralIndexFor } from '../core/format.js';
 import { icon } from '../core/icons.js';
 import { readFlag, writeValue } from '../core/local.js';
 import store from '../core/store.js';
@@ -39,6 +39,7 @@ import toast from '../core/toast.js';
 import { avatar, button, copyToClipboard, emptyState, errorState } from '../components/ui.js';
 import { openComposer } from '../components/composer.js';
 import { confirmDialog, reportDialog } from '../components/report.js';
+import { holdToSpeed } from '../components/videoGestures.js';
 import { router } from '../core/router.js';
 
 /** How far ahead to fetch, in screens. One is enough to cover the swipe. */
@@ -363,6 +364,9 @@ export async function render() {
     tapState.timer = null;
     for (const slide of slides) unbindSlideGestures(slide);
     boundListeners.clear();
+    // One interval per clip, all of them polling a detached element.
+    scrubber?.dispose();
+    scrubber = null;
   });
 
   // Prefetch when the reader is within one screen of the end. Not at the end:
@@ -469,7 +473,7 @@ export async function render() {
   function bindSlideGestures(slide) {
     const stage = slide.querySelector('.videos-stage');
     if (!stage) return;
-    const bound = { stage, onClick: null, onDblClick: null };
+    const bound = { stage, onClick: null, onDblClick: null, hold: null };
 
     // A single tap pauses and a double tap likes, and the two gestures overlap for
     // the first few hundred milliseconds - so the pause cannot be applied on the
@@ -481,6 +485,10 @@ export async function render() {
     // it from `event.detail` alone does not work: the first click of a pair already
     // arrives with `detail === 1`.
     bound.onClick = () => {
+      // A hold already happened and has been released, or is still running. Either
+      // way this click is the tail of that gesture, and pausing here would undo a
+      // deliberate action with the one gesture that was never meant to pause.
+      if (bound.hold?.holding) return;
       if (tapState.timer) {
         clearTimeout(tapState.timer);
         tapState.timer = null;
@@ -500,6 +508,15 @@ export async function render() {
     };
     stage.addEventListener('click', bound.onClick);
     stage.addEventListener('dblclick', bound.onDblClick);
+
+    // Hold to run at twice the rate. The seek bar owns its own pointer, and a press
+    // that started on it must not also arm the hold - a reader dragging the bar
+    // would find the clip speeding up under their finger.
+    bound.hold = holdToSpeed(stage, {
+      video: stage.querySelector('video'),
+      own: (pressEvent) => !pressEvent.target.closest('.videos-scrub'),
+    });
+
     boundListeners.set(stage, bound);
   }
 
@@ -509,6 +526,9 @@ export async function render() {
     if (!bound) return;
     stage.removeEventListener('click', bound.onClick);
     stage.removeEventListener('dblclick', bound.onDblClick);
+    // The rate comes back too. A clip left at 2× because the reader navigated away
+    // mid-hold is one they swipe back to and find inexplicably fast.
+    bound.hold?.cancel();
     boundListeners.delete(stage);
   }
 
@@ -653,6 +673,177 @@ function burstHeart(slide) {
   if (action && !action.classList.contains('is-active')) action.click();
 }
 
+/**
+ * A seek bar for a clip, built rather than borrowed.
+ *
+ * The browser's own control bar is off on this feed - it is a horizontal strip in
+ * the browser's style across the bottom, drawn over the caption - so this replaces
+ * it. Three decisions that make it usable on a phone:
+ *
+ *   - **Thin until touched.** A permanent fat bar over a full-bleed clip is a
+ *     permanent obstruction. It is two pixels at rest, which is enough to show the
+ *     position and to say "there is something here", and it grows under the finger.
+ *   - **A generous hit area with a small visible line.** The drawn line is two
+ *     pixels; the touch target is thirty. Anything else is a strip a thumb misses.
+ *   - **The pointer is captured, not tracked.** Once a drag starts it keeps seeking
+ *     even when the finger leaves the bar, so scrubbing past either end still works
+ *     instead of stopping dead.
+ *
+ * Owns its own pointer: `stopPropagation` on `pointerdown` and `click`, because the
+ * stage treats a tap as pause and a double tap as like, and a reader dragging the
+ * bar must not also like the post.
+ */
+function buildScrubber(video) {
+  const fill = el('span', { class: 'videos-scrub-fill' });
+  const thumb = el('span', { class: 'videos-scrub-thumb', 'aria-hidden': 'true' });
+  const track = el('span', { class: 'videos-scrub-track' }, fill);
+  const readout = el('span', { class: 'videos-scrub-readout', role: 'status', 'aria-live': 'off' });
+
+  const bar = el('div', {
+    class: 'videos-scrub',
+    role: 'slider',
+    tabindex: '0',
+    'aria-label': t('Перемотка'),
+    'aria-valuemin': '0',
+    'aria-valuemax': '100',
+    'aria-valuenow': '0',
+    'aria-valuetext': t('Начало'),
+  }, track, thumb, readout);
+
+  let dragging = false;
+
+  const duration = () => (Number(video.duration) || 0);
+
+  /** Where along the bar a press landed, 0-1. */
+  const ratioAt = (clientX) => {
+    const bounds = bar.getBoundingClientRect();
+    if (bounds.width <= 0) return 0;
+    return Math.max(0, Math.min(1, (clientX - bounds.left) / bounds.width));
+  };
+
+  const paint = (ratio) => {
+    fill.style.width = `${(ratio * 100).toFixed(2)}%`;
+    thumb.style.left = `${(ratio * 100).toFixed(2)}%`;
+    const whole = Math.round(ratio * 100);
+    bar.setAttribute('aria-valuenow', String(whole));
+    bar.setAttribute('aria-valuetext', t('{v0} из {v1}', {
+      v0: formatDuration(ratio * duration() * 1000),
+      v1: formatDuration(duration() * 1000),
+    }));
+  };
+
+  const seekTo = (ratio) => {
+    const total = duration();
+    if (total <= 0) return;
+    paint(ratio);
+    video.currentTime = ratio * total;
+  };
+
+  const down = (event) => {
+    // The stage reads a tap as pause and a double tap as like. A drag that started
+    // here is neither, and both of those gestures are destroyed by letting the event
+    // through.
+    event.stopPropagation();
+    event.preventDefault();
+    if (event.pointerId !== undefined && bar.setPointerCapture) {
+      try {
+        bar.setPointerCapture(event.pointerId);
+      } catch {
+        // Safari refuses capture on an element that is not laid out yet. The drag
+        // still works, it just ends when the finger leaves.
+      }
+    }
+    dragging = true;
+    bar.classList.add('is-dragging');
+    readout.textContent = formatDuration(ratioAt(event.clientX) * duration() * 1000);
+    seekTo(ratioAt(event.clientX));
+  };
+
+  const move = (event) => {
+    if (!dragging) return;
+    event.stopPropagation();
+    seekTo(ratioAt(event.clientX));
+  };
+
+  const up = (event) => {
+    if (!dragging) return;
+    event.stopPropagation();
+    dragging = false;
+    bar.classList.remove('is-dragging');
+    if (event.pointerId !== undefined && bar.releasePointerCapture) {
+      try {
+        bar.releasePointerCapture(event.pointerId);
+      } catch {
+        /* never captured */
+      }
+    }
+  };
+
+  // A click after a drag: the browser would treat the release as a tap and, without
+  // this, the stage would pause the clip the reader was trying to scrub.
+  const click = (event) => event.stopPropagation();
+
+  bar.addEventListener('pointerdown', down);
+  bar.addEventListener('pointermove', move);
+  bar.addEventListener('pointerup', up);
+  bar.addEventListener('pointercancel', up);
+  bar.addEventListener('click', click);
+  bar.addEventListener('dblclick', click);
+  // A long press on the bar would otherwise raise the browser's context menu on
+  // Android, mid-scrub.
+  bar.addEventListener('contextmenu', (event) => event.preventDefault());
+
+  // Keyboard, because a slider that cannot be reached with a keyboard is not a
+  // slider. Arrow keys are the platform convention for one; Home and End are the
+  // ends.
+  bar.addEventListener('keydown', (event) => {
+    const total = duration();
+    if (total <= 0) return;
+    const step = event.shiftKey ? 30 : 5;
+    let next = null;
+    if (event.key === 'ArrowRight') next = Math.min(total, video.currentTime + step);
+    else if (event.key === 'ArrowLeft') next = Math.max(0, video.currentTime - step);
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = total;
+    if (next === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    video.currentTime = next;
+    paint(total > 0 ? next / total : 0);
+  });
+
+  let paintedFor = null;
+  const sync = () => {
+    const total = duration();
+    if (total <= 0 || !Number.isFinite(video.currentTime)) return;
+    const ratio = Math.max(0, Math.min(1, video.currentTime / total));
+    // Repainting on every frame is a layout write sixty times a second for a bar
+    // whose value has not visibly changed. Skipped while dragging, because the drag
+    // is already painting from the finger.
+    if (dragging || Math.abs(ratio - paintedFor) < 0.002) return;
+    paintedFor = ratio;
+    paint(ratio);
+  };
+
+  // Polled rather than event-driven: `timeupdate` fires about four times a second,
+  // which is too coarse for a bar that has to look continuous, and `requestAnimation
+  // Frame` sixty times a second is too much work for one element. A short interval
+  // with a change threshold is the middle, and it stops the moment the bar is
+  // unmounted.
+  const timer = setInterval(sync, 120);
+
+  return {
+    node: bar,
+    observe() {
+      video.addEventListener('loadedmetadata', sync);
+    },
+    dispose() {
+      clearInterval(timer);
+      video.removeEventListener('loadedmetadata', sync);
+    },
+  };
+}
+
 export function unmount() {
   for (const fn of teardown) {
     try {
@@ -683,6 +874,8 @@ function feedSlide(post, currentUser) {
   const isVideo = String(attachment.mime_type || '').startsWith('video/');
 
   let stage;
+  /** The seek bar for this slide's clip. Null on a photo screen. */
+  let scrubber = null;
   if (isVideo) {
     const video = el('video', {
       class: 'videos-clip',
@@ -705,7 +898,16 @@ function feedSlide(post, currentUser) {
     // No click handler here. `bindSlideGestures` owns taps and double taps on the
     // stage, because they have to be distinguished from each other - a pause here
     // and a like there would mean a double tap both likes and pauses.
-    stage = el('div', { class: 'videos-stage' }, video, badge);
+    //
+    // The browser's own controls are off: they are a horizontal strip drawn in the
+    // browser's style across the bottom, on top of the caption, and they arrive
+    // without the one thing a short-video feed needs - a way to scrub that reads as
+    // part of the page.
+    scrubber = buildScrubber(video);
+    stage = el('div', { class: 'videos-stage' }, video, badge, scrubber.node);
+
+    // Told about the stage's scroll so a seek can be shown without a second timer.
+    scrubber.observe();
   } else {
     // No `loading="lazy"`. That was wrong, and measurably so.
     //
