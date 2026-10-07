@@ -849,9 +849,13 @@
   .composer-toolbar { padding-left: 0; }
   .attach-grid { padding-left: 0; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
   .comment { padding: var(--space-3) var(--space-4); }
-  .comment[data-depth="1"] { padding-left: var(--space-7); }
-  .comment[data-depth="2"] { padding-left: var(--space-9); }
-  .comment[data-depth="3"] { padding-left: var(--space-11); }
+  /* The narrow breakpoint reduces the indent rather than increasing it, which is
+     what the block did before: depth 3 asked for --space-11, a step past the end of
+     the scale, so the declaration was dropped and a deeply nested reply rendered
+     with no indent at all - the one level that most needed to show it was nesting. */
+  .comment[data-depth="1"] { padding-left: var(--space-4); }
+  .comment[data-depth="2"] { padding-left: var(--space-5); }
+  .comment[data-depth="3"] { padding-left: var(--space-6); }
   .card-pad, .panel-body { padding: var(--space-4); }
   .tabs { padding: 0 var(--space-3); }
 

@@ -740,9 +740,15 @@
   gap: var(--space-2);
   padding: var(--space-3) var(--space-5);
 }
-.comment[data-depth="1"] { padding-left: var(--space-8); }
-.comment[data-depth="2"] { padding-left: var(--space-11); }
-.comment[data-depth="3"] { padding-left: var(--space-14); }
+/* Indentation for nested comments.
+   The scale stops at --space-9 (96px), so these read past it. On a 360px phone a
+   96px indent plus a 24px gutter leaves the text about 240px wide, and depth 3 was
+   asking for 224px - which would have left the comment body a few characters wide.
+   The nesting is a hint, not a layout: a reader should still be able to read a
+   reply three levels down. Two steps per level, on the grid. */
+.comment[data-depth="1"] { padding-left: var(--space-5); }
+.comment[data-depth="2"] { padding-left: var(--space-7); }
+.comment[data-depth="3"] { padding-left: var(--space-9); }
 .comment[data-is-deleted="true"] { opacity: 0.6; }
 
 .comment-body {
@@ -1444,7 +1450,7 @@
   flex: 1;
   min-width: 1px;
   border-radius: 1px;
-  background: var(--stone-300);
+  background: var(--sand-400);
   transition: background var(--duration-fast) var(--ease-out);
 }
 .voice-note.is-playing .voice-bar.is-played,
@@ -1477,9 +1483,13 @@
   position: absolute;
   inset: 0;
   border-radius: var(--radius-full);
+  /* Both stops carry their own fallback, which is what a conic-gradient needs: one
+   invalid custom property anywhere in a declaration invalidates the whole thing,
+     so a shared `--played` set once by JS would be fine, but leaving it unset until
+   the first `timeupdate` would leave the ring with no background at all. */
   background: conic-gradient(
-    var(--text) var(--played, 0%),
-    var(--stone-200) var(--played, 0%)
+    var(--text) 0 var(--played, 0%),
+    var(--sand-300) var(--played, 0%) 100%
   );
 }
 .circle-face {
@@ -1562,7 +1572,7 @@
   border: none;
   border-radius: var(--radius-full);
   background: var(--stone-600);
-  color: var(--text-on-dark, #fff);
+  color: #fff;
   cursor: pointer;
 }
 
