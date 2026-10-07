@@ -70,9 +70,13 @@ if [ -f "$CANON" ] && ! cmp -s "$CANON" "$SELF"; then
 fi
 
 say "apply migrations if this commit adds any"
-# There is no Alembic history in the repository yet, so the schema is created
-# from the models. `create_all` is additive and idempotent: it adds tables and
-# columns that do not exist and leaves everything else alone.
+# There is no Alembic history in the repository yet, so the schema comes from the
+# models. `create_all` is additive for *tables* only - it issues CREATE TABLE for
+# what is missing and does nothing at all for a table that already exists, so a
+# model that gains a column leaves the database with a table the application
+# cannot read and every endpoint touching it returns 500. `init-db` adds the
+# missing columns after create_all, and prints what it did; an existing column is
+# never dropped or retyped.
 cd "$APP/backend"
 "$PY" -m flask --app wsgi:app init-db
 

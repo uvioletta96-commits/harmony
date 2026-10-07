@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import secrets
+from typing import Any
 
 import click
 from flask import Flask
@@ -34,14 +35,96 @@ def register_commands(app: Flask) -> None:
 @click.option("--drop", is_flag=True, help="Drop every table first. Destroys all data.")
 @with_appcontext
 def init_db(drop: bool) -> None:
-    """Create the schema. Prefer Alembic migrations in production."""
+    """Create the schema, and add any column a model has gained since last deploy.
+
+    ``db.create_all()`` on its own is *not* enough, and the deploy script's comment
+    claimed otherwise until this broke the feed in production: ``create_all`` issues
+    ``CREATE TABLE`` for tables that do not exist and does nothing at all for tables
+    that do. A model that gains a column therefore leaves the database with a table
+    the application cannot read, and the symptom is a 500 on every endpoint that
+    touches it - with no migration having been attempted and none having failed.
+
+    Additive only: a missing column is added, and nothing is dropped, renamed or
+    retyped. That is the only kind of change safe to make automatically, because a
+    wrong guess about a column's *type* loses data irreversibly while a wrong guess
+    about its *absence* costs a column of defaults. Anything else belongs in a real
+    migration.
+    """
     if drop:
         click.confirm("This will permanently delete all data. Continue?", abort=True)
         db.drop_all()
         click.echo("Dropped all tables.")
     db.create_all()
-    click.echo("Schema created.")
+    click.echo("Tables created.")
+    added = add_missing_columns()
+    if added:
+        for table, column in added:
+            click.echo(f"  added {table}.{column}")
+        click.echo(f"{len(added)} column(s) added.")
+    else:
+        click.echo("No columns to add.")
+    click.echo("Schema up to date.")
     click.echo("Next: flask seed-demo  (or set ADMIN_EMAIL / ADMIN_PASSWORD for an admin account)")
+
+
+def add_missing_columns() -> list[tuple[str, str]]:
+    """Add columns the models declare that the database does not have.
+
+    Returns what was added, so a caller can print it and a test can assert on it.
+
+    Only columns a model declares are considered, and only ones the table lacks. An
+    existing column is never touched even if its type has drifted - see the note on
+    ``init-db`` about why that has to be a deliberate decision.
+    """
+    inspector = db.inspect(db.engine)
+    existing_tables = set(inspector.get_table_names())
+    added: list[tuple[str, str]] = []
+
+    for table in db.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            # `create_all` just made it, with every column it declares.
+            continue
+        present = {column["name"] for column in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in present:
+                continue
+            ddl = _add_column_ddl(table.name, column)
+            db.session.execute(db.text(ddl))
+            added.append((table.name, column.name))
+            click.echo(f"  {table.name}.{column.name}: {ddl}")
+
+    if added:
+        db.session.commit()
+    return added
+
+
+def _add_column_ddl(table_name: str, column: Any) -> str:
+    """``ALTER TABLE ... ADD COLUMN ...`` for one model column.
+
+    The rendered type comes from SQLAlchemy rather than being guessed at per
+    backend, so a column added on SQLite in testing and on PostgreSQL in production
+    come out as the same logical shape.
+
+    Server defaults are carried over: without one, PostgreSQL refuses to add a
+    non-nullable column to a table that already has rows, which is the common case
+    on a live site. A model column with no default is therefore added as nullable,
+    and left that way - the application writes the value on the next insert, and
+    backfilling a guess would be worse than a null nobody reads.
+    """
+    rendered = column.type.compile(dialect=db.engine.dialect)
+    parts = [f'ALTER TABLE "{table_name}" ADD COLUMN "{column.name}" {rendered}']
+
+    if column.default is not None and getattr(column.default, "is_scalar", False):
+        parts.append(f"DEFAULT {column.default.arg!r}")
+    elif getattr(column.server_default, "arg", None) is not None:
+        parts.append(f"DEFAULT {column.server_default.arg!r}")
+
+    if not column.nullable:
+        # No default to backfill with, so the constraint would fail against existing
+        # rows. Nullable is the honest state; see the docstring.
+        parts = [p for p in parts if not p.startswith("NOT NULL")]
+
+    return " ".join(parts)
 
 
 @click.command("seed-demo")
