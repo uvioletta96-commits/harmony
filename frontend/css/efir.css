@@ -1,10 +1,10 @@
 /* --------------------------------------------------------------------------
    «Эфир» - the video library.
 
-   The counterpart to videos.css, and the reason it exists as a separate file:
-   the two sections share almost no layout. The vertical feed is one fixed screen
-   per item with no list; this is a grid of cards that scrolls. Rules shared
-   between them would be rules that fit neither.
+   Mobile-first. The phone is the design target and the desktop is what it grows
+   into, not the other way round: on a 360px screen a shelf that can be flicked
+   sideways is a cheaper way to compare than a page you scroll for ever, and a grid
+   of two columns at 172px each is not comparable at all.
 
    Kept to the site's existing language - warm neutrals, thin dividers, the same
    type - so the library reads as part of the same place rather than a different
@@ -12,18 +12,26 @@
    -------------------------------------------------------------------------- */
 
 .efir-page {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: var(--space-5) var(--space-4) var(--space-8);
+  padding: var(--space-4) var(--space-3) var(--space-8);
 }
+
+/* Head ----------------------------------------------------------------------- */
 
 .efir-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--space-4);
-  margin-bottom: var(--space-4);
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
+.efir-head-text { min-width: 0; }
+.efir-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
 .efir-title {
   font-size: var(--text-2xl);
   font-weight: 600;
@@ -31,26 +39,53 @@
   line-height: 1.2;
 }
 .efir-sub {
-  margin-top: var(--space-1);
+  margin-top: 2px;
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
-/* Back to the clip feed, and the only way out of this page on a phone - the
-   bottom bar is the other way, but a reader who arrived from a link has no
-   bottom bar expectation yet. */
-.efir-back { flex-shrink: 0; }
 
+/* Search, on its own row rather than squeezed into the header. At 360px a header
+   with a title, a subtitle and a field beside them has three things fighting for
+   one line, and the field is the one that gets clipped. */
+.efir-search-input {
+  width: 100%;
+  min-width: 0;
+  font-size: var(--text-sm);
+  /* 16px is not a style choice: anything smaller makes iOS Safari zoom the page in
+     on focus, and there is no way for the reader to zoom back out. */
+  font-size: 16px;
+}
+.efir-head-actions .efir-search-input { width: 168px; }
+
+@media (max-width: 560px) {
+  .efir-head-actions { width: 100%; flex-basis: 100%; }
+  .efir-head { flex-wrap: wrap; }
+  .efir-head-actions .efir-search-input { flex: 1; width: auto; }
+}
+
+/* Shelves and sorts ---------------------------------------------------------- */
+
+/* Both are horizontally scrollable and deliberately do not wrap: a wrapped row of
+   tabs on a phone pushes the grid below the fold, and the grid is the section. */
+.efir-shelves,
 .efir-sorts {
   display: flex;
   gap: var(--space-1);
-  margin-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border-soft);
   overflow-x: auto;
   scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
 }
+.efir-shelves::-webkit-scrollbar,
 .efir-sorts::-webkit-scrollbar { display: none; }
+
+.efir-shelves {
+  margin-bottom: var(--space-2);
+}
+.efir-shelf-tab,
 .efir-sort {
-  position: relative;
+  flex-shrink: 0;
+  scroll-snap-align: start;
   padding: var(--space-2) var(--space-3);
   border: none;
   background: transparent;
@@ -61,8 +96,25 @@
   cursor: pointer;
   transition: color var(--duration-fast) var(--ease-out);
 }
+.efir-shelf-tab:hover,
 .efir-sort:hover { color: var(--text-secondary); }
+.efir-shelf-tab.is-active,
 .efir-sort.is-active { color: var(--text); }
+
+/* The shelves are the primary control on a phone, so they carry the underline and
+   the sort row does not: one emphasis per row, or neither reads as primary. */
+.efir-shelf-tab.is-active::after {
+  content: '';
+  display: block;
+  height: 2px;
+  margin-top: 4px;
+  background: var(--text);
+  border-radius: 1px;
+}
+.efir-sorts {
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-soft);
+}
 .efir-sort.is-active::after {
   content: '';
   position: absolute;
@@ -73,15 +125,59 @@
   background: var(--text);
   border-radius: 1px;
 }
+.efir-sort { position: relative; }
 
-/* Grid ---------------------------------------------------------------------- */
+/* Shelf rows ------------------------------------------------------------------ */
 
-/* `auto-fill` with a floor rather than a fixed column count: the library is a
-   grid of things to compare, and the number on screen follows the width. At 360px
-   this is one column, which is what a single card needs to be legible. */
+.efir-shelf-row { margin-bottom: var(--space-4); }
+
+.efir-shelf-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.efir-shelf-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.efir-shelf-more {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.efir-shelf-more:hover { color: var(--text); }
+
+/* Cards are 68% of the viewport width rather than a fixed 260px: two cards are
+   visible with a third edge peeking, which is what tells a thumb there is more to
+   swipe to. A fixed width shows either one card and a gap or three and a half. */
+.efir-shelf-track {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+  margin: 0 calc(-1 * var(--space-3));
+  padding: 0 var(--space-3);
+  -webkit-overflow-scrolling: touch;
+}
+.efir-shelf-track::-webkit-scrollbar { display: none; }
+.efir-shelf-cell {
+  flex: 0 0 68%;
+  scroll-snap-align: start;
+  min-width: 0;
+}
+
+/* Grid ------------------------------------------------------------------------ */
+
 .efir-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: 1fr;
   gap: var(--space-4);
 }
 
@@ -101,20 +197,40 @@
   overflow: hidden;
   background: var(--bg-sunken);
 }
-.efir-thumb-img {
+
+/* The poster. A `<video>` used only as a decoder: it never plays - a `play` listener
+   pauses it - because it exists to have one frame drawn out of it onto a canvas. */
+.efir-thumb-video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  /* `cover`, because this is a poster and not the thing itself - the whole point
-     of a card is to be looked at, and a letterboxed strip of a portrait video
-     would be mostly black. The full video is one tap away. */
+  /* `cover`, because this is a poster and not the thing itself - the whole point of
+     a card is to be looked at, and a letterboxed strip of a portrait video would be
+     mostly black. The full video is one tap away. */
   object-fit: cover;
+  background-color: var(--bg-sunken);
+  background-size: cover;
+  background-position: center;
   display: block;
+  /* Fades in when the frame is ready, so twenty cards appearing at once does not
+     read as the page jumping. */
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.efir-thumb-video.is-ready { opacity: 1; }
+/* No frame could be drawn: a neutral tile rather than a broken image, which is what
+   this used to be on every card. */
+.efir-thumb-video.is-unavailable {
+  opacity: 1;
+  background-image: linear-gradient(150deg, var(--sand-200), var(--sand-300));
 }
 
 .efir-length {
   position: absolute;
   right: var(--space-2);
   bottom: var(--space-2);
+  z-index: 2;
   padding: 1px 5px;
   border-radius: var(--radius-xs);
   background: rgb(0 0 0 / 0.78);
@@ -124,9 +240,47 @@
   line-height: 1.5;
 }
 
+/* Watched so far. A bar, not a number: "осталось 12 минут" is what a part-watched
+   video is for, and a bar is readable without reading. */
+.efir-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  height: 3px;
+  background: rgb(255 255 255 / 0.28);
+}
+.efir-progress::after {
+  content: '';
+  display: block;
+  width: var(--watched, 0%);
+  height: 100%;
+  background: var(--text-on-accent, #fff);
+}
+
+/* Save. Top-right so it cannot collide with the length badge on a narrow card. */
+.efir-save {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  cursor: pointer;
+}
+.efir-save.is-saved { background: var(--text); }
+
 .efir-play-hint {
   position: absolute;
   inset: 0;
+  z-index: 1;
   display: grid;
   place-items: center;
   color: #fff;
@@ -134,14 +288,19 @@
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-out);
 }
-.efir-card:hover .efir-play-hint { opacity: 1; }
+/* Hover is a pointer-only affordance, so on a touch screen the play glyph is simply
+   never shown - and the whole card is the target instead. */
+@media (hover: hover) and (pointer: fine) {
+  .efir-card:hover .efir-play-hint { opacity: 1; }
+}
 
-/* The button covers the picture rather than sitting inside it as a small target.
-   A 40px icon in the corner of a thumbnail is a hard tap on a phone, and the
-   whole card is the obvious thing to touch. */
+/* The button covers the picture rather than sitting inside it as a small target. A
+   40px icon in the corner of a thumbnail is a hard tap on a phone, and the whole
+   card is the obvious thing to touch. */
 .efir-open {
   position: absolute;
   inset: 0;
+  z-index: 4;
   width: 100%;
   height: 100%;
   border: none;
@@ -171,7 +330,6 @@
   min-width: 0;
 }
 .efir-card-author {
-  color: var(--text-muted);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -179,7 +337,7 @@
 }
 .efir-dot { flex-shrink: 0; color: var(--text-faint); }
 
-.efir-sentinel { grid-column: 1 / -1; height: 1px; }
+.efir-sentinel { height: 1px; }
 .efir-status {
   padding: var(--space-4) 0;
   text-align: center;
@@ -188,27 +346,26 @@
   min-height: 1px;
 }
 
-/* Player -------------------------------------------------------------------- */
+/* Player ---------------------------------------------------------------------- */
 
+/* Full-bleed on a phone and centred on a wide screen, from the same element. A
+   phone dialog with a video in it has borders and a title bar nobody wants, and a
+   desktop that goes full-bleed for one video looks broken. */
 .efir-player {
   position: fixed;
   inset: 0;
   z-index: 60;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  background: rgb(0 0 0 / 0.92);
+  background: #000;
 }
 .efir-player-frame {
-  width: min(100%, 1100px);
-  aspect-ratio: 16 / 9;
-  max-height: 78vh;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
   background: #000;
-  border-radius: var(--radius-md);
-  overflow: hidden;
 }
 .efir-player-video {
   width: 100%;
@@ -219,19 +376,60 @@
   object-fit: contain;
   background: #000;
 }
-.efir-player-info {
-  width: min(100%, 1100px);
+
+.efir-speed { position: absolute; z-index: 3; top: calc(var(--space-3) + env(safe-area-inset-top, 0px)); left: var(--space-3); }
+.efir-speed {
+  min-width: 44px;
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-full);
+  background: rgb(255 255 255 / 0.14);
   color: #fff;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.efir-speed-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 64px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: rgb(20 20 20 / 0.94);
+}
+.efir-speed-item {
+  padding: var(--space-2);
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: #fff;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.efir-speed-item:hover,
+.efir-speed-item.is-active { background: rgb(255 255 255 / 0.16); }
+
+.efir-player-info {
+  padding: var(--space-3) var(--space-3) calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+  color: #fff;
+  background: #000;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  /* Capped so the controls are always reachable: on a short phone an uncapped
+     title pushes the player's own controls below the bottom of the screen. */
+  max-height: 30vh;
+  overflow-y: auto;
 }
 .efir-player-title {
   font-size: var(--text-base);
   font-weight: 500;
   line-height: 1.4;
-  max-height: 4.2em;
-  overflow-y: auto;
 }
 .efir-player-meta {
   display: flex;
@@ -249,6 +447,7 @@
 
 .efir-player-close {
   position: absolute;
+  z-index: 4;
   top: calc(var(--space-3) + env(safe-area-inset-top, 0px));
   right: var(--space-3);
   display: grid;
@@ -263,18 +462,67 @@
 }
 .efir-player-close:hover { background: rgb(255 255 255 / 0.22); }
 
-@media (max-width: 560px) {
-  .efir-page { padding: var(--space-4) var(--space-3) var(--space-8); }
-  .efir-grid {
-    /* One column below 560px. Two columns of a 260px floor at 360px would be 172px
-       each once the gaps are counted - too narrow for a title and an author line,
-       and the grid stops being comparable, which is the only reason for it. */
-    grid-template-columns: 1fr;
+/* The bottom bar's own padding is the page's bottom padding, so a player over it
+   would show the bar through. */
+body.has-player .mobile-nav,
+body.has-player .fab { display: none; }
+
+@media (min-width: 720px) {
+  .efir-page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: var(--space-5) var(--space-4) var(--space-8);
   }
-  .efir-player-frame { max-height: 62vh; }
+  .efir-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: var(--space-4) var(--space-5);
+  }
+  /* Wider cells so the flick is less twitchy and two and a half are visible. */
+  .efir-shelf-cell { flex-basis: 260px; }
+  .efir-shelf-track {
+    margin: 0;
+    padding: 0;
+    gap: var(--space-3);
+  }
+
+  /* The player gets the light backdrop and the framed shape back. */
+  .efir-player {
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    background: rgb(0 0 0 / 0.92);
+  }
+  .efir-player-frame {
+    flex: none;
+    width: min(100%, 1100px);
+    aspect-ratio: 16 / 9;
+    max-height: 74vh;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .efir-player-info {
+    flex: none;
+    width: min(100%, 1100px);
+    max-height: 22vh;
+    padding: 0;
+    background: none;
+  }
+  .efir-player-title {
+    font-size: var(--text-lg);
+    max-height: 4.2em;
+    overflow-y: auto;
+  }
+  .efir-player-close {
+    top: var(--space-3);
+    right: var(--space-3);
+  }
+  .efir-speed { top: var(--space-3); left: var(--space-3); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .efir-play-hint { transition: none; }
+  .efir-play-hint,
+  .efir-thumb-video,
+  .efir-shelf-tab,
   .efir-sort { transition: none; }
 }

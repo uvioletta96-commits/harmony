@@ -35,14 +35,27 @@ def defined() -> set[str]:
 
 
 def used() -> dict[str, list[str]]:
-    """`var(--name)` occurrences, mapped to where they were used."""
+    """`var(--name)` occurrences with **no fallback**, mapped to where.
+
+    A fallback is what makes a custom property safe, so reporting
+    `var(--watched, 0%)` as undefined is a false alarm - and false alarms are how a
+    check like this stops being read.
+
+    The fallback is detected by the delimiter immediately after the name: a comma
+    means one follows, a closing bracket means none does. The first version of this
+    matched everything up to the next comma or bracket, which for
+    `var(--watched, 0%)` captured the empty string and so reported a variable that
+    did have a fallback as undefined.
+    """
     found: dict[str, list[str]] = {}
+    pattern = re.compile(r"var\(\s*(--[a-z0-9-]+)\s*([,)])")
     for path in sorted(CSS_DIR.glob("*.css")):
         for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             if line.strip().startswith("*") or line.strip().startswith("/*"):
                 continue
-            for name in re.findall(r"var\((--[a-z0-9-]+)", line):
-                found.setdefault(name, []).append(f"{path.name}:{line_no}")
+            for name, delimiter in pattern.findall(line):
+                if delimiter == ")":
+                    found.setdefault(name, []).append(f"{path.name}:{line_no}")
     return found
 
 

@@ -101,10 +101,13 @@ class TestImmersive:
     def test_it_is_remembered_but_can_be_turned_off(self):
         """A reader who left immersive once should not be put straight back on every
         visit - a mode you cannot easily re-enter feels hostile."""
-        arm = body_of(VIDEOS, "function armAutoFullscreen()")
+        arm = code_only(body_of(VIDEOS, "function armAutoFullscreen()"))
         assert "videosImmersive" in arm, "the choice is not remembered"
-        assert "store.get(IMMERSIVE_KEY) !== false" in arm, (
+        assert "readFlag(IMMERSIVE_KEY, true)" in arm, (
             "immersive mode cannot be declined once"
+        )
+        assert "writeValue(IMMERSIVE_KEY, on)" in arm, (
+            "the decline is never written, so nothing is remembered"
         )
 
     def test_the_browser_fullscreen_waits_for_a_gesture(self):
@@ -277,8 +280,11 @@ class TestTheSplit:
     def test_the_library_shows_the_length_and_a_player(self):
         """A card without a length tells a reader nothing about what they are about
         to spend four minutes on."""
-        card = body_of(EFIR, "function videoCard(item)")
+        card = body_of(EFIR, "function videoCard(item, { compact = false } = {})")
         assert "duration_ms" in card, "the card badge does not show the length"
+        assert "formatDuration" in card, (
+            "the badge shows a raw millisecond count rather than a length"
+        )
         assert "controls" in EFIR, (
             "the library's player has no controls, so a long video cannot be seeked "
             "in - which is the reason it is not in the feed"

@@ -33,6 +33,7 @@ import api from '../core/api.js';
 import { clear, el } from '../core/dom.js';
 import { compactNumber, pluralIndex as pluralIndexFor } from '../core/format.js';
 import { icon } from '../core/icons.js';
+import { readFlag, writeValue } from '../core/local.js';
 import store from '../core/store.js';
 import toast from '../core/toast.js';
 import { avatar, button, copyToClipboard, emptyState, errorState } from '../components/ui.js';
@@ -107,7 +108,7 @@ export async function render() {
 
   // Chrome visibility, remembered across the session rather than per page: a
   // reader who hid it to watch wants it still hidden when they come back.
-  let chromeVisible = store.get('videosChrome') !== false;
+  let chromeVisible = readFlag('videosChrome', true);
 
   const tabs = el('div', { class: 'videos-tabs', role: 'tablist' },
     ...KINDS.map((entry) => el('button', {
@@ -176,7 +177,7 @@ export async function render() {
     shell.dataset.chrome = visible ? 'on' : 'off';
     chromeToggle.title = visible ? t('Скрыть оформление') : t('Показать оформление');
     chromeToggle.setAttribute('aria-label', chromeToggle.title);
-    store.set('videosChrome', visible);
+    writeValue('videosChrome', visible);
   }
 
   /** Enter or leave the browser's own fullscreen, on the scroller. */
@@ -573,11 +574,11 @@ export async function render() {
  */
 function armAutoFullscreen() {
   const IMMERSIVE_KEY = 'videosImmersive';
-  const wantsImmersive = store.get(IMMERSIVE_KEY) !== false;
+  const wantsImmersive = readFlag(IMMERSIVE_KEY, true);
 
   const setImmersive = (on) => {
     document.body.classList.toggle('is-immersive', on);
-    store.set(IMMERSIVE_KEY, on);
+    writeValue(IMMERSIVE_KEY, on);
   };
 
   // (1) immediately, and reversible: the explicit exit button turns it off.
