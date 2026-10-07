@@ -52,15 +52,24 @@ class ApiClient:
     def delete(self, url: str, json: Any = None, **kwargs: Any):
         return self._request("delete", url, json, **kwargs)
 
-    def upload(self, url: str, files: dict[str, Any], **kwargs: Any):
+    def upload(self, url: str, files: dict[str, Any], form: dict[str, Any] | None = None, **kwargs: Any):
         """POST a multipart body.
 
         ``files`` maps a field name to ``(stream|bytes, filename, content_type)``.
         Werkzeug's test client turns that into a real multipart body, so the
         request genuinely exercises the upload path.
+
+        ``form`` are the ordinary form fields alongside it - the chat attachment
+        endpoint needs `kind`, `duration_ms` and `waveform`, and merging them into
+        ``files`` is how Werkzeug decides which parts are files and which are not.
+        A field value that is not a tuple is a plain form field to it, so the two
+        go in one dictionary.
         """
+        body: dict[str, Any] = dict(files)
+        for name, value in (form or {}).items():
+            body[name] = value if isinstance(value, tuple) else str(value)
         kwargs.setdefault("content_type", "multipart/form-data")
-        return self._request("post", url, None, data=files, **kwargs)
+        return self._request("post", url, None, data=body, **kwargs)
 
     def open(self, method: str, url: str, **kwargs: Any):
         return self._request(method, url, kwargs.pop("json", None), **kwargs)

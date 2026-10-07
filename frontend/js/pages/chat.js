@@ -16,7 +16,14 @@ import toast from '../core/toast.js';
 import { router } from '../core/router.js';
 import realtime from '../core/realtime.js';
 import { relativeTime, smartDate, initialsOf, colourFor, dayLabel } from '../core/format.js';
-import { avatar, button, emptyState, errorState, loadingRow, iconButton, setLoading } from '../components/ui.js';
+import { avatar, button, emptyState, errorState, loadingRow, iconButton, openLightbox, setLoading } from '../components/ui.js';
+import {
+  canRecord,
+  messageAttachments,
+  pickAndUpload,
+  startRecording,
+  uploadRecording,
+} from '../components/chatMedia.js';
 
 const TYPING_TIMEOUT = 3500;
 
@@ -70,6 +77,22 @@ export async function render({ id } = {}) {
     node: shell,
     unmount() {
       if (active) realtime.leaveConversation(active.id);
+
+      // The microphone first, before anything else is torn down.
+      //
+      // A recording left running after leaving the thread is a microphone indicator
+      // that never goes away, and the reader has no way to stop it - the button
+      // that stops it has just left the document. `cancel` rather than `stop`, so
+      // nothing is recorded into the void and then uploaded.
+      active?.composer?.stopRecording();
+
+      // Pause anything playing. An <audio> that keeps playing after the thread is
+      // gone keeps pulling bytes over a mobile connection for audio nobody can
+      // reach the control for.
+      for (const media of document.querySelectorAll('.chat-messages audio, .chat-messages video')) {
+        media.pause?.();
+      }
+
       teardown.forEach((fn) => fn?.());
       teardown = [];
     },
@@ -186,15 +209,21 @@ async function openConversation(conversationId, host, listHost) {
     }, icon('user', { size: 18 })),
   );
 
-  const composer = el('div', { class: 'chat-composer' },
-    el('button', { class: 'icon-btn', type: 'button', 'aria-label': t('Прикрепить изображение'), title: t('Изображение'), onclick: () => attachImage(composerInput) }, icon('image', { size: 19 })),
+  const context = {
+    id: conversationId,
+    other,
+    messagesHost,
     composerInput,
     sendButton,
-  );
+    typingNode: null,
+    typingTimer: null,
+  };
 
-  host.append(header, messagesHost, composer);
+  const composer = buildComposer(context);
+  context.composer = composer;
 
-  const context = { id: conversationId, other, messagesHost, composerInput, sendButton, typingNode: null, typingTimer: null };
+  host.append(header, messagesHost, composer.node);
+
   bindComposer(context);
 
   await loadMessages(context);
@@ -243,10 +272,17 @@ function bubble(message, mine) {
   const pending = message.__pending;
   const failed = message.__failed;
 
+  const attachments = messageAttachments(message, {
+    onOpen: (attachment) => openLightbox({ ...attachment, url: attachment.url }),
+  });
+
   const node = el('div', {
-    class: `bubble ${mine ? 'bubble-out' : 'bubble-in'} ${pending ? 'bubble-pending' : ''} ${failed ? 'bubble-failed' : ''}`,
+    class: `bubble ${mine ? 'bubble-out' : 'bubble-in'} ${pending ? 'bubble-pending' : ''} ${failed ? 'bubble-failed' : ''} ${attachments ? 'bubble-has-media' : ''}`,
   },
-    el('div', { text: message.body }),
+    attachments,
+    // Only when there is text. An empty div for a photo-only message puts a gap in
+    // the bubble and a stray set of line breaks under the picture.
+    message.body ? el('div', { class: 'bubble-text', text: message.body }) : null,
     el('div', { class: 'bubble-meta' },
       smartDate(message.created_at),
       mine ? (failed ? t(' · не отправлено') : pending ? t(' · отправляется…') : '') : '',
@@ -276,8 +312,270 @@ function scrollToBottom(host) {
   });
 }
 
-function bindComposer(context) {
+/**
+ * The composer's file and recording controls.
+ *
+ * The tray sits above the text field and holds whatever has been picked but not
+ * yet sent, each with its own remove button. It is a tray rather than a
+ * send-immediately list because a photo picked and a sentence typed over it are one
+ * message, and making the reader choose an order before they have finished typing
+ * is a worse question than "send".
+ *
+ * Recording is hold-to-record. The microphone is open only while a finger is
+ * down, so there is no recording left running after the reader lets go and nothing
+ * to send by accident.
+ */
+function buildComposer(context) {
   const { composerInput, sendButton } = context;
+
+  const tray = el('div', { class: 'composer-tray', hidden: true });
+  const pending = [];
+
+  /**
+   * Redraw the tray from `pending`.
+   *
+   * One source of truth: the array is the list, and the row of chips is rebuilt
+   * from it. The earlier version removed a node and then re-appended it, which
+   * meant the chip a reader had just removed came straight back.
+   */
+  const paintTray = () => {
+    clear(tray);
+    tray.hidden = pending.length === 0;
+    tray.dataset.count = String(pending.length);
+    if (!pending.length) return;
+
+    tray.append(el('div', { class: 'composer-chips' }, ...pending.map(chipFor)));
+  };
+
+  const addPending = (attachment) => {
+    pending.push(attachment);
+    paintTray();
+    syncSend();
+  };
+
+  /** One removable chip, rebuilt from an attachment each time the tray is drawn. */
+  function chipFor(attachment) {
+    const chip = attachment.kind === 'voice' || attachment.kind === 'circle'
+      ? el('span', { class: 'composer-chip composer-chip-voice' },
+          icon('mic', { size: 15 }),
+          el('span', { text: attachment.kind === 'circle' ? t('Кружок') : t('Голосовое') }))
+      : attachment.kind === 'video'
+        ? el('span', { class: 'composer-chip' }, icon('video', { size: 15 }), el('span', { text: t('Видео') }))
+        : el('img', {
+            class: 'composer-chip-image',
+            src: attachment.thumbnail_url || attachment.url,
+            alt: t('Прикреплённое фото'),
+          });
+
+    const remove = el('button', {
+      class: 'composer-chip-remove',
+      type: 'button',
+      'aria-label': t('Убрать'),
+      title: t('Убрать'),
+    }, icon('close', { size: 13 }));
+
+    remove.addEventListener('click', () => {
+      const index = pending.indexOf(attachment);
+      if (index >= 0) pending.splice(index, 1);
+      // The file was already uploaded, so removing the chip stops it being a
+      // candidate rather than un-uploading it: there is no endpoint to un-claim it
+      // with, and the nightly sweep collects the row.
+      paintTray();
+      syncSend();
+    });
+
+    return el('span', { class: 'composer-chip-wrap' }, chip, remove);
+  }
+
+  const syncSend = () => {
+    // A message may be only files, only text, or both. The button follows all three
+    // rather than only the first, or a photo-only message is unsendable.
+    sendButton.classList.toggle('is-ready', Boolean(composerInput.value.trim()) || pending.length > 0);
+    sendButton.disabled = !composerInput.value.trim() && pending.length === 0;
+  };
+
+  const pickPhotos = async () => {
+    const picked = await pickAndUpload(
+      context.id,
+      'image/jpeg,image/png,image/webp,image/gif',
+      'image',
+    );
+    for (const attachment of picked) addPending(attachment);
+  };
+
+  const pickVideos = async () => {
+    const picked = await pickAndUpload(context.id, 'video/mp4,video/webm,video/ogg', 'video');
+    for (const attachment of picked) addPending(attachment);
+  };
+
+  /* -- Recording --------------------------------------------------------- */
+
+  let recording = null;
+  let circleMode = false;
+
+  const recordButton = el('button', {
+    class: 'composer-mic',
+    type: 'button',
+    'aria-label': t('Записать голосовое сообщение'),
+    title: t('Записать голосовое'),
+  },
+    icon('mic', { size: 19 }),
+    el('span', { class: 'composer-mic-time' }),
+  );
+
+  const circleButton = el('button', {
+    class: 'composer-mic composer-mic-circle',
+    type: 'button',
+    'aria-label': t('Записать кружок'),
+    title: t('Записать кружок'),
+  }, icon('circle', { size: 19 }));
+
+  circleButton.addEventListener('click', () => {
+    circleMode = !circleMode;
+    circleButton.classList.toggle('is-active', circleMode);
+    recordButton.classList.toggle('is-circle', circleMode);
+    recordButton.setAttribute('aria-label', circleMode ? t('Записать кружок') : t('Записать голосовое сообщение'));
+  });
+
+  const meter = el('span', { class: 'composer-meter', 'aria-hidden': 'true' },
+    el('span', { class: 'composer-meter-fill' }));
+  const timerLabel = recordButton.querySelector('.composer-mic-time');
+
+  const beginRecording = async () => {
+    if (recording) return;
+    if (!canRecord()) {
+      toast.error(t('Браузер не умеет записывать голос'));
+      return;
+    }
+    try {
+      recording = await startRecording({
+        onLevel: (level) => {
+          meter.style.setProperty('--level', String(level));
+        },
+        onTick: (seconds) => {
+          timerLabel.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+        },
+      });
+    } catch (error) {
+      // A refused microphone permission lands here, and so does a browser that
+      // cannot reach a device. Both are worth naming rather than failing silently.
+      toast.error(error.name === 'NotAllowedError'
+        ? t('Нужен доступ к микрофону')
+        : t('Не удалось начать запись'));
+      recording = null;
+    }
+  };
+
+  const endRecording = async () => {
+    const handle = recording;
+    recording = null;
+    meter.style.setProperty('--level', '0');
+    timerLabel.textContent = '';
+    if (!handle) return;
+
+    const clip = await handle.stop();
+    if (!clip) return; // released too early to be a message
+
+    try {
+      const attachment = await uploadRecording(context.id, clip, circleMode ? 'circle' : 'voice');
+      addPending(attachment);
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+
+  // Hold to record, on the button and on the whole composer, so a thumb resting on
+  // the microphone does not have to find the icon exactly.
+  recordButton.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    recordButton.classList.add('is-recording');
+    beginRecording();
+  });
+  for (const name of ['pointerup', 'pointercancel', 'pointerleave']) {
+    recordButton.addEventListener(name, () => {
+      if (!recordButton.classList.contains('is-recording')) return;
+      recordButton.classList.remove('is-recording');
+      endRecording();
+    });
+  }
+  // A keyboard user gets a click, which starts and stops. Without this the only way
+  // to record is a pointer, and hold-to-record has no keyboard gesture of its own.
+  recordButton.addEventListener('keydown', (event) => {
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      if (recording) endRecording();
+      else {
+        recordButton.classList.add('is-recording');
+        beginRecording();
+      }
+    }
+  });
+  recordButton.addEventListener('keyup', (event) => {
+    if ((event.key === ' ' || event.key === 'Enter') && recording) {
+      event.preventDefault();
+      recordButton.classList.remove('is-recording');
+      endRecording();
+    }
+  });
+
+  composerInput.addEventListener('input', syncSend);
+
+  const node = el('div', { class: 'chat-composer-wrap' },
+    tray,
+    el('div', { class: 'chat-composer' },
+      el('div', { class: 'composer-tools' },
+        el('button', {
+          class: 'icon-btn',
+          type: 'button',
+          'aria-label': t('Прикрепить фото'),
+          title: t('Фото'),
+          onclick: pickPhotos,
+        }, icon('image', { size: 19 })),
+        el('button', {
+          class: 'icon-btn',
+          type: 'button',
+          'aria-label': t('Прикрепить видео'),
+          title: t('Видео'),
+          onclick: pickVideos,
+        }, icon('video', { size: 19 })),
+        circleButton,
+        recordButton,
+        meter,
+      ),
+      composerInput,
+      sendButton,
+    ),
+  );
+
+  return {
+    node,
+    tray,
+    pending,
+    addPending,
+    syncSend,
+    isRecording: () => Boolean(recording),
+    // Recorded on the context so `unmount` can release the microphone. A recording
+    // left running after leaving the thread is a microphone indicator that never
+    // goes away, and the reader has no way to stop it.
+    stopRecording: () => {
+      if (recording) {
+        recording.cancel();
+        recording = null;
+        meter.style.setProperty('--level', '0');
+        timerLabel.textContent = '';
+        recordButton.classList.remove('is-recording');
+      }
+    },
+    clear() {
+      pending.length = 0;
+      paintTray();
+      syncSend();
+    },
+  };
+}
+
+function bindComposer(context) {
+  const { composerInput, sendButton, composer } = context;
 
   const resize = () => {
     composerInput.style.height = 'auto';
@@ -294,19 +592,45 @@ function bindComposer(context) {
     }
   });
 
-  const send = () => {
+  const send = async () => {
     const body = composerInput.value.trim();
-    if (!body) return;
+    const files = [...(composer?.pending || [])];
+    if (!body && !files.length) return;
+
     composerInput.value = '';
+    composer?.clear();
     resize();
     realtime.sendTyping(context.id, false);
 
-    // Optimistic bubble: shown immediately, reconciled when the server acks.
-    const optimistic = { body, created_at: new Date().toISOString(), __pending: true };
+    // Uploaded files are already on the server, unclaimed. Claiming them is one
+    // request; a failure here leaves them unclaimed and the nightly sweep collects
+    // them, so nothing is orphaned by a reader losing connection mid-send.
+    const mediaIds = files.map((attachment) => attachment.id);
+    const optimistic = {
+      body,
+      attachments: files.map((attachment, index) => ({ ...attachment, id: `local-${index}` })),
+      created_at: new Date().toISOString(),
+      __pending: true,
+    };
     appendMessage(optimistic, { mine: true });
 
     const offline = !realtime.isConnected();
-    realtime.sendMessage(context.id, body);
+
+    if (mediaIds.length) {
+      try {
+        // The socket's `message:send` carries text only, so an attachment goes over
+        // REST. The bubble is already on screen either way, and the socket event
+        // that follows replaces it with the stored message.
+        await api.post(`/conversations/${context.id}/messages`, { body, media_ids: mediaIds });
+      } catch (error) {
+        toast.error(error.message);
+        const node = document.querySelector('.bubble-pending');
+        node?.classList.remove('bubble-pending');
+        node?.classList.add('bubble-failed');
+      }
+    } else {
+      realtime.sendMessage(context.id, body);
+    }
 
     if (offline) {
       toast.info(t('Нет соединения — сообщение будет отправлено автоматически.'));
@@ -318,6 +642,9 @@ function bindComposer(context) {
 }
 
 async function attachImage(composerInput) {
+  // Superseded by the composer's photo button, which uploads into the tray rather
+  // than appending a bare URL to the text. Kept for the avatar picker, which
+  // genuinely does want a URL back.
   const input = el('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp,image/gif', class: 'visually-hidden' });
   document.body.append(input);
   input.addEventListener('change', async () => {

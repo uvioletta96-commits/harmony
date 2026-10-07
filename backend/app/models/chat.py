@@ -131,6 +131,80 @@ class ConversationMember(PrimaryKeyMixin, TimestampMixin, db.Model):
     user = relationship("User", lazy="joined")
 
 
+class AttachmentKind(str, Enum):
+    """What a message attachment is.
+
+    ``VOICE`` and ``CIRCLE`` are the same bytes and the same player; the
+    difference is purely how it is presented - a bar in the bubble against a round
+    avatar. Keeping them apart means the client does not have to guess from
+    geometry, and the wave data can be stored once for both.
+    """
+
+    IMAGE = "image"
+    VIDEO = "video"
+    VOICE = "voice"
+    CIRCLE = "circle"
+
+
+class MessageAttachment(PrimaryKeyMixin, TimestampMixin, db.Model):
+    """One file attached to a message.
+
+    Separate from :class:`Message` rather than columns on it, because a message can
+    carry several files and a photo sent alone must still have somewhere to live.
+
+    Bytes are on disk; only metadata is here, and the URL is written by the upload
+    endpoint - the client can never dictate where a file lives or what it is.
+    """
+
+    __tablename__ = "message_attachments"
+    __table_args__ = (
+        UniqueConstraint("message_id", "position", name="uq_message_attachment_position"),
+        Index("ix_message_attachments_message", "message_id", "position"),
+        Index("ix_message_attachments_owner", "owner_id"),
+    )
+
+    message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    kind: Mapped[str] = enum_column(AttachmentKind, "attachment_kind", default=AttachmentKind.IMAGE)
+    storage_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str] = mapped_column(String(512), nullable=False)
+    thumbnail_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    mime_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    width: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    height: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    #: Milliseconds. Recorded by the client from its own recording, because the
+    #: server cannot decode the container to check it - and a voice message whose
+    #: length is wrong cannot be rendered as a progress bar.
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    #: Peaks for the waveform, 0-100, computed by the client while recording.
+    #: Stored as a compact JSON array because the player draws it as bars and the
+    #: client would otherwise have to decode the audio file to draw them.
+    waveform: Mapped[list[int] | None] = mapped_column(db.JSON, nullable=True)
+    alt_text: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+
+    message = relationship("Message", back_populates="attachments")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "kind": self.kind,
+            "url": self.url,
+            "thumbnail_url": self.thumbnail_url or self.url,
+            "mime_type": self.mime_type,
+            "byte_size": self.byte_size,
+            "width": self.width,
+            "height": self.height,
+            "duration_ms": self.duration_ms,
+            "waveform": self.waveform or [],
+            "alt_text": self.alt_text,
+        }
+
+
 class Message(PrimaryKeyMixin, PublicIdMixin, TimestampMixin, db.Model):
     __tablename__ = "messages"
     __table_args__ = (
@@ -153,13 +227,28 @@ class Message(PrimaryKeyMixin, PublicIdMixin, TimestampMixin, db.Model):
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", lazy="joined")
     reply_to = relationship("Message", remote_side="Message.id")
+    attachments = relationship(
+        "MessageAttachment",
+        back_populates="message",
+        # Sorted explicitly rather than by the relationship's `order_by`, for the
+        # same reason posts do it: attachments claimed onto a brand-new message are
+        # appended in memory, and the sender arranged them deliberately.
+        order_by="MessageAttachment.position",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def to_dict(self, viewer: User | None = None) -> dict[str, Any]:
+        attachments = [a.to_dict() for a in sorted(self.attachments or [], key=lambda a: a.position)]
+
         if self.status == MessageStatus.DELETED.value:
             return {
                 "id": self.public_id,
                 "conversation_id": self.conversation.public_id if self.conversation else None,
                 "body": "",
+                # Attachments go with the text. A "deleted" message that still
+                # serves its photos is not deleted.
+                "attachments": [],
                 "status": self.status,
                 "created_at": iso(self.created_at),
                 "is_deleted": True,
@@ -170,6 +259,7 @@ class Message(PrimaryKeyMixin, PublicIdMixin, TimestampMixin, db.Model):
             "sender": self.sender.to_public_dict(viewer) if self.sender else None,
             "reply_to_id": self.reply_to.public_id if self.reply_to else None,
             "body": self.body,
+            "attachments": attachments,
             "status": self.status,
             "created_at": iso(self.created_at),
             "edited_at": iso(self.edited_at),
@@ -209,10 +299,12 @@ def message_count_since(conversation_id: int, since: datetime | None) -> int:  #
 
 
 __all__ = [
+    "AttachmentKind",
     "Conversation",
     "ConversationKind",
     "ConversationMember",
     "Message",
+    "MessageAttachment",
     "MessageStatus",
     "conversation_for_user",
     "message_count_since",

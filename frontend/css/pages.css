@@ -70,7 +70,11 @@
   margin-bottom: 2px;
 }
 
-.bubble-image { margin-top: var(--space-2); border-radius: var(--radius-md); max-width: 260px; }
+/* `.bubble-image` and the rest of the message-attachment styling used to live here
+   as well as in components.css. This file loads last, so a rule here silently won
+   over the one the chat page is actually written against — two files describing one
+   class is the same trap as two coordinate systems for one measurement. The chat
+   attachment styles are all in components.css now, next to `.bubble`. */
 
 /* --------------------------------------------------------------------------
    Admin

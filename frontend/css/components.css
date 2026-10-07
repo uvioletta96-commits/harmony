@@ -1346,6 +1346,296 @@
 }
 
 /* --------------------------------------------------------------------------
+   Message attachments
+   -------------------------------------------------------------------------- */
+
+/* A bubble carrying a file is sized by the file, not by the 72% text limit: the
+   cap is there so a long sentence wraps, and applying it to a photograph just
+   makes it small. `width: fit-content` would let a wide photo stretch the bubble
+   to the cap anyway, so the media box is what carries the width. */
+.bubble-has-media {
+  max-width: min(84%, 460px);
+  padding: var(--space-1);
+}
+.bubble-has-media .bubble-text {
+  padding: var(--space-1) var(--space-2) 0;
+  margin-top: 4px;
+}
+.bubble-has-media .bubble-meta { padding-bottom: 2px; }
+
+.bubble-attachments { display: flex; flex-direction: column; gap: 4px; }
+
+/* One, two, three-plus. Past three the pictures tile rather than shrink further —
+   a grid of four 60px thumbnails is unreadable, and the first three carry the
+   message. */
+.bubble-media {
+  display: grid;
+  gap: 2px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-sunken);
+}
+.bubble-media-1 { grid-template-columns: 1fr; }
+.bubble-media-2 { grid-template-columns: 1fr 1fr; }
+.bubble-media-3 { grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr; }
+.bubble-media-3 > :first-child { grid-row: span 2; }
+
+.bubble-image,
+.bubble-video {
+  display: block;
+  width: 100%;
+  /* Photos are not re-encoded for the bubble, so a portrait one arrives taller than
+     the bubble's cap and `object-fit: cover` crops it. Cropping a chat photo is the
+     wrong trade: the point of sending a picture in a message is that the other
+     person sees the thing that was sent. So the height is capped instead and the
+     width follows. */
+  height: auto;
+  max-height: 340px;
+  object-fit: contain;
+  background: var(--bg-sunken);
+}
+.bubble-media-2 .bubble-image,
+.bubble-media-2 .bubble-video,
+.bubble-media-3 .bubble-image,
+.bubble-media-3 .bubble-video { max-height: 150px; }
+.bubble-media-3 > :first-child.bubble-image,
+.bubble-media-3 > :first-child.bubble-video { max-height: 302px; }
+
+.bubble-image.is-zoomable { cursor: zoom-in; }
+
+/* Voice ---------------------------------------------------------------------- */
+
+.bubble-voice { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+.voice-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 190px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-1);
+}
+.voice-play {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--bg-sunken);
+  color: var(--text);
+  cursor: pointer;
+}
+.bubble-in .voice-play { background: var(--bg-sunken); }
+.bubble-out .voice-play { background: rgba(255, 255, 255, 0.55); }
+.voice-play:hover { filter: brightness(1.05); }
+
+/* The bars are the scrubber. `align-items: flex-end` so a short peak is a short bar
+   growing from one baseline rather than a short bar floating in the middle. */
+.voice-wave {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 26px;
+  min-width: 0;
+}
+.voice-bar {
+  flex: 1;
+  min-width: 1px;
+  border-radius: 1px;
+  background: var(--stone-300);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.voice-note.is-playing .voice-bar.is-played,
+.voice-bar.is-played { background: var(--text); }
+.voice-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+/* Circle --------------------------------------------------------------------- */
+
+.voice-circle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  /* The ring is drawn with a conic gradient so it can show progress without a
+     second element animating its width: `--played` is set from the audio's own
+     currentTime, so the arc is always the truth rather than a remembered guess. */
+  border-radius: var(--radius-full);
+}
+.circle-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-full);
+  background: conic-gradient(
+    var(--text) var(--played, 0%),
+    var(--stone-200) var(--played, 0%)
+  );
+}
+.circle-face {
+  position: absolute;
+  inset: 3px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--bg-sunken);
+}
+.voice-circle.is-playing .circle-face { background: var(--dusk-100); }
+.voice-circle .circle-face svg { position: relative; color: var(--text); }
+.voice-circle:not(.is-playing) .circle-face svg { opacity: 0; }
+.circle-avatar { width: 100%; height: 100%; object-fit: cover; }
+.circle-initials { font-size: var(--text-lg); font-weight: 600; color: var(--text-muted); }
+
+/* Composer ------------------------------------------------------------------- */
+
+.chat-composer-wrap {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg-raised);
+}
+.chat-composer-wrap .chat-composer { border-top: none; }
+
+.composer-tray {
+  padding: var(--space-2) var(--space-4) 0;
+}
+.composer-chips {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.composer-chips::-webkit-scrollbar { display: none; }
+
+/* The wrapper exists so the remove button can be positioned against the chip
+   without the chip having to be `position: relative` - which would make it the
+   containing block for its own image and let the button escape the tray's own
+   overflow. */
+.composer-chip-wrap {
+  position: relative;
+  flex-shrink: 0;
+  display: block;
+}
+.composer-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  width: 62px;
+  height: 62px;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  color: var(--text-muted);
+}
+.composer-chip span { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.composer-chip-image {
+  display: block;
+  width: 62px;
+  height: 62px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
+  background: var(--bg-sunken);
+}
+.composer-chip-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--stone-600);
+  color: var(--text-on-dark, #fff);
+  cursor: pointer;
+}
+
+.composer-tools { display: flex; align-items: center; gap: 2px; }
+
+/* Hold to record. The recording state is drawn on the button itself, so a reader
+   who has let go by accident can see it immediately rather than inferring from a
+   microphone icon elsewhere in the OS. */
+.composer-mic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  touch-action: none;
+  /* The whole point is that a finger stays down on it, so the browser must not
+     turn a long press into a context menu or a text selection. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.composer-mic:hover { background: var(--bg-sunken); color: var(--text); }
+.composer-mic.is-active { background: var(--dusk-100); color: var(--ink-900); }
+.composer-mic.is-recording {
+  background: var(--danger-soft);
+  color: var(--danger);
+  animation: mic-pulse 1.4s var(--ease-in-out) infinite;
+}
+.composer-mic-time {
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.composer-meter {
+  width: 4px;
+  height: 26px;
+  border-radius: var(--radius-full);
+  background: var(--bg-sunken);
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+}
+.composer-meter-fill {
+  width: 100%;
+  height: calc(var(--level, 0) * 1%);
+  min-height: 0;
+  border-radius: var(--radius-full);
+  background: var(--dusk-400, var(--stone-500));
+  transition: height 90ms linear;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--danger-border); }
+  50%      { box-shadow: 0 0 0 5px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-mic.is-recording { animation: none; }
+  .voice-bar { transition: none; }
+  .composer-meter-fill { transition: none; }
+}
+
+/* --------------------------------------------------------------------------
    Tables
    -------------------------------------------------------------------------- */
 

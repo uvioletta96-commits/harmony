@@ -180,6 +180,24 @@ class BaseConfig:
     #: uploaded - the cap is the only thing standing between a user and a disk
     #: full of files, and it is enforced before anything touches the disk.
     UPLOAD_MAX_VIDEO_BYTES: int = env_int("UPLOAD_MAX_VIDEO_BYTES", 50 * 1024 * 1024)
+
+    #: Audio, for voice messages and voice circles. The allowed list is what a
+    #: browser's MediaRecorder actually emits - WebM/Opus on Firefox and Chrome,
+    #: MP4/AAC on Safari and iOS - rather than every audio format, so the client can
+    #: hand over whatever it was given without inspecting it. A narrower list than
+    #: that means voice messages silently fail on exactly the platform an iPhone
+    #: user is on.
+    UPLOAD_ALLOWED_AUDIO_MIME: list[str] = env_list(
+        "UPLOAD_ALLOWED_AUDIO_MIME", "audio/webm,audio/mp4,audio/ogg,audio/mpeg,audio/wav"
+    )
+    UPLOAD_MAX_AUDIO_BYTES: int = env_int("UPLOAD_MAX_AUDIO_BYTES", 25 * 1024 * 1024)
+    #: Ceiling on one recording, in seconds. A voice message is meant to be heard
+    #: without headphones, so past a minute the reader has already stopped.
+    CHAT_MAX_VOICE_SECONDS: int = env_int("CHAT_MAX_VOICE_SECONDS", 300)
+    #: Files per message. Photos are the reason this exists; without a cap a client
+    #: could attach a hundred images to one message and make every other member
+    #: fetch a hundred.
+    CHAT_MAX_ATTACHMENTS: int = env_int("CHAT_MAX_ATTACHMENTS", 10)
     UPLOAD_STRIP_EXIF: bool = env_bool("UPLOAD_STRIP_EXIF", True)
     SERVE_UPLOADS: bool = env_bool("SERVE_UPLOADS", True)
 

@@ -43,7 +43,7 @@ def upload_image():
     verify_csrf()
     enforce("upload:image")
 
-    files, inline = _collect_payload()
+    files, inline = collect_upload_payload()
     if not files:
         raise ValidationError("Не передано ни одного файла.", code="no_files")
 
@@ -90,8 +90,12 @@ def upload_image():
     )
 
 
-def _collect_payload() -> tuple[list[tuple[bytes, str]], dict]:  # type: ignore[no-untyped-def]
-    """Accept multipart uploads or a JSON base64 body."""
+def collect_upload_payload() -> tuple[list[tuple[bytes, str]], dict]:  # type: ignore[no-untyped-def]
+    """Accept multipart uploads or a JSON base64 body.
+
+    Shared with the chat attachment endpoint, which accepts the same two shapes for
+    the same reason. One base64 parser rather than two copies that can drift.
+    """
     files: list[tuple[bytes, str]] = []
     inline: dict = {}
 

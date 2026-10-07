@@ -11,10 +11,12 @@ from sqlalchemy import func, select
 from ..extensions import db
 from ..models.base import utcnow
 from ..models.chat import (
+    AttachmentKind,
     Conversation,
     ConversationKind,
     ConversationMember,
     Message,
+    MessageAttachment,
     MessageStatus,
     conversation_for_user,
 )
@@ -138,18 +140,34 @@ def list_messages(
 # ---------------------------------------------------------------------------
 
 
-def send_message(conversation: Conversation, sender: User, body: str) -> Message:
+def send_message(
+    conversation: Conversation,
+    sender: User,
+    body: str,
+    *,
+    attachments: Sequence[MessageAttachment] | None = None,
+    alt_texts: dict[int, str] | None = None,
+) -> Message:
+    """Send a message, with text, with files, or with both.
+
+    A message may be empty of text as long as it carries a file - a photo with no
+    caption and a voice message are both valid - so the emptiness check is against
+    the two together.
+    """
     if conversation.is_locked and not sender.is_moderator:
         raise PermissionError_("Чат заблокирован администратором.", code="conversation_locked")
 
     limit = int(current_app.config.get("CHAT_MAX_MESSAGE_CHARS", 4000))
     clean_body = sanitize_plain_text(body or "", max_length=limit)
-    if not clean_body:
+    claims = list(attachments or [])
+    if not clean_body and not claims:
         raise ValidationError(
             "Сообщение не может быть пустым.", code="empty_message", fields={"body": "Введите текст сообщения."}
         )
 
-    # Respect the recipient's "messages from anyone" preference.
+    # The recipient's preference applies to a message that is only a file just as
+    # much as to one that is only text: someone who does not want messages from
+    # strangers does not want their photos either.
     blocked = [
         member
         for member in conversation.members or []
@@ -163,7 +181,10 @@ def send_message(conversation: Conversation, sender: User, body: str) -> Message
         raise PermissionError_("Этот пользователь не принимает сообщения от незнакомцев.", code="messages_not_allowed")
 
     spam.guard_write(clean_body, sender)
-    decision = moderation_engine().screen(clean_body, context="message")
+    # Screened with the text that will be shown. An empty body is not a reason to
+    # skip the check - a photo-only message is the one most likely to be abuse, and
+    # the file's own scan happens at upload.
+    decision = moderation_engine().screen(clean_body or "медиа", context="message")
     decision.raise_for_decision(kind="message")
 
     message = Message(
@@ -176,8 +197,17 @@ def send_message(conversation: Conversation, sender: User, body: str) -> Message
     db.session.add(message)
     db.session.flush()
 
+    texts = alt_texts or {}
+    for position, claim in enumerate(claims):
+        claim.message_id = message.id
+        claim.position = position
+        if texts.get(position):
+            claim.alt_text = texts[position][:240]
+
     conversation.last_message_at = message.created_at
-    conversation.last_message_preview = clean_body[:160]
+    # The preview is what the conversation list shows, so a photo-only message needs
+    # something to say - "Фото" rather than an empty line.
+    conversation.last_message_preview = (clean_body[:160] if clean_body else _preview_for(claims))[:160]
     conversation.messages_count = (conversation.messages_count or 0) + 1
 
     recipients = 0
@@ -200,6 +230,74 @@ def send_message(conversation: Conversation, sender: User, body: str) -> Message
         recipients=recipients,
     )
     return message
+
+
+def _preview_for(attachments: Sequence[MessageAttachment]) -> str:
+    """One line for the conversation list when a message is only a file.
+
+    Without it a photo-only message leaves an empty row and the thread looks
+    finished when it is not.
+    """
+    kinds = {a.kind for a in attachments}
+    if AttachmentKind.VOICE.value in kinds or AttachmentKind.CIRCLE.value in kinds:
+        return "Голосовое сообщение"
+    if AttachmentKind.VIDEO.value in kinds:
+        return "Видео"
+    return "Фото"
+
+
+def claim_attachments(
+    owner: User,
+    attachment_ids: Sequence[Any],
+) -> list[MessageAttachment]:
+    """Resolve client-supplied attachment ids to rows the sender actually owns.
+
+    An id belonging to somebody else is a 404, not a silent skip: a client that
+    believes it attached a photo should be told the photo is not theirs, rather than
+    posting a message with a hole in it.
+
+    Rows already claimed by a message are refused too, which is what stops one
+    attachment being replayed into many messages.
+
+    No conversation parameter, deliberately. The ids are internal and unique, so a
+    row that belongs to the caller is the caller's row whichever conversation they
+    send it to - and adding the conversation here would suggest the check is
+    stronger than it is. The endpoint it is reached from is already scoped to one.
+    """
+    resolved: list[MessageAttachment] = []
+    for raw in attachment_ids or []:
+        try:
+            numeric = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError("Некорректный идентификатор вложения.", code="bad_attachment_id") from exc
+
+        row = db.session.get(MessageAttachment, numeric)
+        if row is None or row.owner_id != owner.id:
+            raise NotFoundError("Вложение не найдено.", code="attachment_not_found")
+        if row.message_id is not None:
+            raise ConflictError("Вложение уже отправлено.", code="attachment_already_sent")
+        resolved.append(row)
+    return resolved
+
+
+def can_send_to(conversation: Conversation, sender: User) -> bool:
+    """Whether ``sender`` may post in this conversation at all.
+
+    Split out of :func:`send_message` so the attachment endpoint can ask the
+    question *before* writing bytes. Upload-then-refuse would leave a file on disk
+    for a conversation the sender was never allowed to use, and nothing would
+    collect it until the nightly sweep.
+    """
+    blocked = [
+        member
+        for member in conversation.members or []
+        if member.user_id != sender.id
+        and not member.left_at
+        and member.user is not None
+        and not member.user.allow_messages_from_anyone
+        and not _is_mutual_contact(sender, member.user)
+    ]
+    return not (blocked and not sender.is_moderator)
 
 
 def _is_mutual_contact(sender: User, other: User) -> bool:
@@ -255,6 +353,16 @@ def mark_read(conversation: Conversation, user: User, *, up_to_message_id: str |
 def delete_message(message: Message, actor: User) -> None:
     if message.sender_id != actor.id and not actor.is_moderator:
         raise PermissionError_("Вы можете удалять только свои сообщения.", code="not_message_owner")
+
+    # The files go before the text, not with it.
+    #
+    # A soft delete that clears the body but leaves the attachment rows serves the
+    # photos anyway - the row is still there and the URL still resolves. "Delete
+    # this message" has to mean the photograph is gone, not that the sentence
+    # introducing it is. Soft-deleting rather than deleting the row keeps the
+    # message's place in the thread for the other reader.
+    discard_attachments(list(message.attachments or []))
+
     message.status = MessageStatus.DELETED.value
     message.body = ""
     message.deleted_at = utcnow()
@@ -272,6 +380,30 @@ def delete_message(message: Message, actor: User) -> None:
         message.conversation.last_message_preview = replacement.body[:160] if replacement else None
     db.session.commit()
     _broadcast(message.conversation, message, actor, event="message.deleted")
+
+
+def discard_attachments(attachments: Sequence[MessageAttachment]) -> None:
+    """Drop attachment rows and the bytes behind them.
+
+    Both halves. The row alone leaves the file reachable through a URL someone
+    already has; the file alone leaves a row pointing at nothing, which the nightly
+    orphan sweep would then try to unlink again.
+
+    A file that cannot be removed is logged rather than raised: the row is about to
+    be deleted either way, and failing the whole delete because of one locked file
+    would leave the user unable to remove the message at all.
+    """
+    from . import upload_service
+
+    for attachment in attachments:
+        try:
+            upload_service.remove_stored(attachment.storage_key)
+        except (OSError, ValueError) as exc:
+            log_event(
+                logger, "WARNING", "chat.attachment_file_kept",
+                storage_key=attachment.storage_key, error=exc.__class__.__name__,
+            )
+        db.session.delete(attachment)
 
 
 def leave_conversation(conversation: Conversation, user: User) -> None:

@@ -18,6 +18,13 @@ const PATHS = {
   expand: 'M2.2 5.8V3.2a1 1 0 011-1h2.6M14 5.8V3.2a1 1 0 00-1-1h-2.6M2.2 10.2v2.6a1 1 0 001 1h2.6M14 10.2v2.6a1 1 0 01-1 1h-2.6',
   collapse: 'M5.8 2.2H3.2a1 1 0 00-1 1v2.6M10.2 2.2h2.6a1 1 0 011 1v2.6M5.8 13.8H3.2a1 1 0 01-1-1v-2.6M10.2 13.8h2.6a1 1 0 001-1v-2.6',
   pause: 'M5.6 3.4v9.2M10.4 3.4v9.2',
+  // A microphone, not a generic dot: the recording button has to be
+  // recognisable at 19px without a label.
+  mic: 'M8 9.6a2 2 0 002-2v-3.2a2 2 0 00-4 0v3.2a2 2 0 002 2zM4.8 7.2a3.2 3.2 0 006.4 0M8 10.4v2.8',
+  video: 'M2.2 5.4a1 1 0 011-1h5a1 1 0 011 1v5.2a1 1 0 01-1 1h-5a1 1 0 01-1-1zM9.2 8l4-2.6v5.2L9.2 8z',
+  // A ring, for "record a circle". The dot inside is what distinguishes it from
+  // the microphone button beside it at the same size.
+  circle: 'M8 14.2A6.2 6.2 0 108 1.8a6.2 6.2 0 000 12.4zM8 6.4a1.6 1.6 0 100 3.2 1.6 1.6 0 000-3.2z',
   volume: 'M7.4 3.2L4 6H2.2v4H4l3.4 2.8zM10 6.2a2.4 2.4 0 010 3.6M11.9 4.2a5 5 0 010 7.6',
   volumeOff: 'M7.4 3.2L4 6H2.2v4H4l3.4 2.8zM10.2 6.6l3.4 2.8M13.6 6.6l-3.4 2.8',
   eye: 'M1.6 8s2.4-4.2 6.4-4.2S14.4 8 14.4 8 12 12.2 8 12.2 1.6 8 1.6 8zM8 9.8a1.8 1.8 0 100-3.6 1.8 1.8 0 000 3.6z',

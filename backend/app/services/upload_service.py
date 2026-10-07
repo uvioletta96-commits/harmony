@@ -63,6 +63,19 @@ VIDEO_SIGNATURES: tuple[tuple[str, bytes, int, int], ...] = (
     ("video/ogg", b"OggS", 0, 4),
 )
 
+#: Audio containers for voice messages, detected the same way. The set is what a
+#: browser's `MediaRecorder` actually produces - which is not the same as "every
+#: audio format": WebM/Opus on Firefox and Chrome, MP4/AAC on Safari and iOS.
+#: Accepting only what the recorder emits is what makes the client code portable,
+#: because it can hand over whatever it was given without inspecting it.
+AUDIO_SIGNATURES: tuple[tuple[str, bytes, int, int], ...] = (
+    ("audio/webm", b"\x1a\x45\xdf\xa3", 0, 4),  # same EBML header as WebM video
+    ("audio/mp4", b"ftyp", 4, 4),  # what Safari's MediaRecorder writes
+    ("audio/ogg", b"OggS", 0, 4),
+    ("audio/mpeg", b"\xff\xfb", 0, 2),  # MP3 frame sync, without the ID3 tag
+    ("audio/wav", b"RIFF", 0, 4),
+)
+
 SUFFIXES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
@@ -71,6 +84,11 @@ SUFFIXES = {
     "video/mp4": ".mp4",
     "video/webm": ".webm",
     "video/ogg": ".ogv",
+    "audio/webm": ".webm",
+    "audio/mp4": ".m4a",
+    "audio/ogg": ".ogg",
+    "audio/mpeg": ".mp3",
+    "audio/wav": ".wav",
 }
 
 #: Formats we re-encode to. GIF is passed through untouched because re-encoding
@@ -124,9 +142,32 @@ def sniff_video_mime(data: bytes) -> str | None:
     return None
 
 
+def sniff_audio_mime(data: bytes) -> str | None:
+    """Identify an audio container from its magic bytes.
+
+    Same discipline as the image and video sniffers, and the same reason: the
+    extension and the client's Content-Type are both attacker-controlled.
+
+    Order matters where signatures overlap. WebM video and WebM audio share an
+    EBML header, and `audio/mp4` shares the ISO brand with `video/mp4` - so a
+    caller that does not know what it has gets the video answer, which is the
+    safer of the two to over-report.
+    """
+    if not data:
+        return None
+    for mime, signature, offset, length in AUDIO_SIGNATURES:
+        if data[offset : offset + length] == signature:
+            return mime
+    return None
+
+
 def sniff_media_mime(data: bytes) -> str | None:
-    """Identify an upload as either an image or a video."""
-    return sniff_mime(data) or sniff_video_mime(data)
+    """Identify an upload as an image, a video or an audio file.
+
+    Image first, then video, then audio: the sniffers overlap where the formats
+    share a container, and reporting the richer type is the one that renders.
+    """
+    return sniff_mime(data) or sniff_video_mime(data) or sniff_audio_mime(data)
 
 
 def sniff_mime(data: bytes) -> str | None:
@@ -201,6 +242,19 @@ def _write(storage_key: str, payload: bytes) -> str:
     from .storage import get_storage
 
     return get_storage().write(storage_key, payload)
+
+
+def remove_stored(*storage_keys: str | None) -> None:
+    """Delete stored files by key, ignoring any that are already gone.
+
+    Delegates to :func:`delete_image`, whose name predates video and audio but
+    whose body is type-agnostic - it removes a key and the thumbnail beside it,
+    which is exactly what any attachment needs. Reimplemented here it would be a
+    second copy of the `_thumb` convention to keep in step.
+    """
+    for key in storage_keys:
+        if key:
+            delete_image(key)
 
 
 def store_image(
@@ -337,6 +391,135 @@ def store_video(
         mime_type=mime_type,
         content_hash=content_hash,
     )
+
+
+def store_audio(
+    data: bytes,
+    *,
+    user_id: int,
+    alt_text: str | None = None,
+) -> StoredMedia:
+    """Validate and persist one recorded voice clip.
+
+    Stored byte-for-byte, like video: a recording is already whatever the browser
+    produced, and re-encoding it server-side would mean shipping ffmpeg for no gain.
+
+    The duration is not read from the file. The container's header field is not
+    reliable across the four formats above, and a voice message whose length is
+    wrong cannot be drawn as a progress bar - so the client reports it while
+    recording, where it knows exactly, and :func:`store_audio` is told.
+    """
+    if not data:
+        raise ValidationError("Файл пуст.", code="empty_upload")
+
+    max_bytes = int(current_app.config.get("UPLOAD_MAX_AUDIO_BYTES", 25 * 1024 * 1024))
+    if len(data) > max_bytes:
+        raise PayloadTooLargeError(
+            f"Голосовое сообщение слишком длинное ({max_bytes // (1024 * 1024)} МБ).",
+            code="audio_too_large",
+        )
+
+    mime_type = sniff_audio_mime(data)
+    allowed = set(current_app.config.get("UPLOAD_ALLOWED_AUDIO_MIME") or [])
+    if mime_type is None or mime_type not in allowed:
+        raise UnsupportedMediaTypeError(
+            "Поддерживаются только записи голоса.", code="unsupported_audio"
+        )
+
+    content_hash = hashlib.sha256(data).hexdigest()
+    storage_key = build_storage_key(user_id, mime_type, content_hash)
+    _write(storage_key, data)
+
+    log_event(logger, "INFO", "upload.audio_stored", user_id=user_id, mime_type=mime_type, byte_size=len(data))
+    return StoredMedia(
+        storage_key=storage_key,
+        url=public_url(storage_key),
+        thumbnail_url=None,
+        width=0,
+        height=0,
+        byte_size=len(data),
+        mime_type=mime_type,
+        content_hash=content_hash,
+    )
+
+
+def store_chat_media(data: bytes, *, user_id: int, kind: str = "image") -> StoredChatMedia:
+    """Persist a file destined for a chat message.
+
+    `kind` says how the client wants it presented. What it *is* is decided by the
+    bytes, and a file that is not even close is refused - which is the check that
+    matters, because a JPEG uploaded as a voice recording is a client bug or an
+    attempt to get something past the audio path, and either way should not be
+    stored.
+
+    The audio case has an honest limitation. WebM video and WebM audio share an
+    EBML header, and MP4 video and MP4 audio share an ISO brand, so the first four
+    bytes cannot tell a recording from a clip in either container - and those are
+    exactly the two formats `MediaRecorder` produces. So for a voice message the
+    declared kind is what disambiguates the container family, and the bytes are
+    only checked for belonging to that family at all. Distinguishing them properly
+    means walking the EBML tree for a video track, which is a decoder's job and
+    belongs in ffmpeg, not in a sniffer.
+
+    Everything else is checked strictly: a photo must sniff as an image and a video
+    must sniff as a video.
+    """
+    sniffed = sniff_media_mime(data)
+    if sniffed is None:
+        raise UnsupportedMediaTypeError(
+            "Не удалось определить тип файла.", code="unsupported_chat_media"
+        )
+
+    families = {
+        "image": ("image/",),
+        "video": ("video/",),
+        "voice": ("audio/", "video/"),
+        "circle": ("audio/", "video/"),
+    }.get(kind)
+    if families is None:
+        raise ValidationError("Неизвестный тип вложения.", code="bad_attachment_kind")
+
+    if not any(sniffed.startswith(family) for family in families):
+        raise UnsupportedMediaTypeError(
+            "Файл не соответствует выбранному типу.", code="attachment_kind_mismatch"
+        )
+
+    # An audio file is stored as audio; a video that arrived as a "voice message"
+    # is stored as a video, so the stored type still tells the truth and the client
+    # can render something that plays.
+    if sniffed.startswith("audio/"):
+        media = store_audio(data, user_id=user_id)
+    elif sniffed.startswith("video/"):
+        media = store_video(data, user_id=user_id)
+    else:
+        media = store_image(data, user_id=user_id)
+
+    return StoredChatMedia(
+        kind=kind,
+        storage_key=media.storage_key,
+        url=media.url,
+        thumbnail_url=media.thumbnail_url,
+        width=media.width,
+        height=media.height,
+        byte_size=media.byte_size,
+        mime_type=media.mime_type,
+        content_hash=media.content_hash,
+    )
+
+
+@dataclass(slots=True)
+class StoredChatMedia:
+    """What :func:`store_chat_media` returns: a stored file plus how it is presented."""
+
+    kind: str
+    storage_key: str
+    url: str
+    thumbnail_url: str | None
+    width: int
+    height: int
+    byte_size: int
+    mime_type: str
+    content_hash: str
 
 
 def store_media(
