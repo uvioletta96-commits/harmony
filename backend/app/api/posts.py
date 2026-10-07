@@ -68,6 +68,9 @@ def video_feed():
     post and shows nothing else.
 
     ``kind`` picks video (the default), photo, or both.
+
+    Only clips: a video longer than three minutes is in ``/videos/library`` instead,
+    because a reader who cannot swipe past a four-minute video is stuck on it.
     """
     enforce("global")
     page = post_service.get_video_feed(
@@ -76,7 +79,27 @@ def video_feed():
         limit=request.args.get("limit"),
         kind=(request.args.get("kind") or "video").strip().lower(),
     )
-    return ok(page.items, meta=page.to_meta({"mode": "videos"}))
+    return ok(page.items, meta=page.to_meta({"mode": "videos", "kind": (request.args.get("kind") or "video").strip().lower()}))
+
+
+@bp.get("/videos/library")
+@auth_optional
+def video_library():
+    """The video library: videos past the clip cut-off, as a browsable grid.
+
+    The counterpart to ``/videos``, and readable by a signed-out visitor: the
+    vertical feed is readable too, and the library is the one a reader is more
+    likely to arrive at from outside, through a link somebody sent them.
+    """
+    enforce("global")
+    page = post_service.get_video_library(
+        _viewer(),
+        cursor=request.args.get("cursor"),
+        limit=request.args.get("limit"),
+        sort=(request.args.get("sort") or "recent").strip().lower(),
+        author=(request.args.get("author") or "").strip() or None,
+    )
+    return ok(page.items, meta=page.to_meta({"mode": "videos_library", "sort": (request.args.get("sort") or "recent").strip().lower()}))
 
 
 @bp.get("/posts/search")

@@ -188,6 +188,47 @@ video:-webkit-full-screen {
   background: #000;
 }
 
+/* Immersive: the site's own chrome, gone ------------------------------------------------ */
+
+/* This is the part the reader means by "на весь экран" on a phone.
+ *
+ * The browser's own address bar and tab bar are already at the top and bottom; what
+ * was in between was ours - a header with a title and three buttons, a row of tabs,
+ * and the bottom navigation. Together about a fifth of the screen height, which is
+ * why a clip looked letterboxed into a slot rather than filling the display.
+ *
+ * Set on `body` by the page rather than on the page itself, because the elements
+ * being hidden belong to the shell: the shell is built once and kept across
+ * navigations, so styling it from inside the page would mean reaching up through
+ * ancestors that may not be related by anything more specific than `body`.
+ *
+ * The exit affordance is re-shown at the end, because hiding every way out of a
+ * full-screen mode is the failure mode worth avoiding rather than the tidy one. */
+body.is-immersive .topbar,
+body.is-immersive .mobile-nav,
+body.is-immersive .fab,
+body.is-immersive .videos-head,
+body.is-immersive .videos-tabs { display: none; }
+
+/* With the shell's top bar gone the page starts at the top of the viewport, so
+   `100dvh` now really is the screen. Before, it was the screen minus a header. */
+body.is-immersive .videos-page { height: 100dvh; }
+
+/* The way out. Positioned over the content rather than in the header, since the
+   header is what got hidden - and given a solid backdrop so it is legible over a
+   bright frame, which a bare icon on a white video is not. */
+body.is-immersive .videos-exit {
+  position: absolute;
+  top: calc(var(--space-3) + env(safe-area-inset-top, 0px));
+  left: var(--space-3);
+  z-index: 6;
+  display: inline-flex;
+  background: rgb(0 0 0 / 0.5);
+  color: #fff;
+  border-radius: var(--radius-full);
+  backdrop-filter: blur(4px);
+}
+
 /* Chrome hidden by the reader ------------------------------------------------- */
 
 .videos-page[data-chrome="off"] .videos-meta,
@@ -225,18 +266,47 @@ body:has(video:fullscreen) .videos-exit { display: inline-flex; }
   user-select: none;
 }
 
+/* A clip fills its screen.
+ *
+ * `cover`, not `contain`. This is the whole point of a vertical short-video feed:
+ * a 16:9 clip on a 19.5:9 phone letterboxed by `contain` occupies about half the
+ * screen and leaves black bars above and below - which is what the reader reported
+ * as "обрезается по размеру". `cover` scales until the frame is full-bleed, so
+ * there is no bar and the video is as large as the screen allows.
+ *
+ * The trade is that the sides of a wide clip run off the edge, and that is the
+ * right way round: the reader can pan with a finger, and a video they can see all
+ * of but which occupies half the screen is the worse outcome. Photo screens keep
+ * `contain`, because a still has no panning gesture - see below. */
 .videos-clip {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   background: #000;
   display: block;
 }
 
-/* A photo fills its screen rather than sitting in a letterbox: the point of a
-   one-image screen is the image. A portrait photo on a tall phone still gets
-   `contain`, so it is never cropped without the reader asking for it. */
-.videos-still { object-fit: cover; }
+/* A photo is still `contain`.
+ *
+ * The opposite trade from a clip, on purpose. A still has no duration and no
+ * panning gesture, so `cover` would silently hide whatever fell outside the frame
+ * and the reader would never know it was there. Letterboxing a portrait photo on a
+ * tall phone costs almost nothing anyway - the aspect ratios are close. */
+.videos-still { object-fit: contain; }
+
+/* A wide clip on a portrait screen: `cover` crops the sides, and a reader who
+   wants to see what is off-frame pans with a finger. Said out loud in CSS because
+ * the pan is not obvious and without it `cover` looks like a bug. */
+.videos-stage { cursor: grab; }
+.videos-stage:active { cursor: grabbing; }
+
+/* Landscape phones get the reverse trade: the screen is wider than it is tall, so
+   `cover` on a portrait clip throws away the top and the bottom - the author's
+   face and whatever they are holding. `contain` there, and the bars are the price
+   of seeing the frame. */
+@media (orientation: landscape) and (max-height: 480px) {
+  .videos-clip { object-fit: contain; }
+}
 
 .videos-play-badge {
   position: absolute;

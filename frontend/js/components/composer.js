@@ -174,6 +174,17 @@ export function composer({ onPosted, placeholder = 'Что нового?', autof
     for (const item of pending) {
       const body = new FormData();
       body.append('file', item.file);
+      // How long a clip runs, measured here because this is the only moment the
+      // browser knows it: a video element's `duration` is not readable until the
+      // file has been loaded into it, and after upload the browser has nothing to
+      // read. The figure decides whether the video goes to the vertical feed or to
+      // «Эфир», so sending nothing sends it to the feed that always exists - which
+      // is the better place to be wrong for a long video nobody can swipe past.
+      if (isVideo(item.file)) {
+        const duration = await measureDuration(item.file);
+        item.durationMs = duration;
+        body.append('durations', String(duration));
+      }
       try {
         const result = await api.upload('/uploads/images', body);
         item.storageKey = result.files[0].storage_key;
@@ -185,6 +196,56 @@ export function composer({ onPosted, placeholder = 'Что нового?', autof
         renderAttachments();
         toast.error(error.message);
       }
+    }
+  }
+
+  const isVideo = (file) => Boolean(file.type) && file.type.startsWith('video/');
+
+  /**
+   * A video file's length, in milliseconds.
+   *
+   * Reads a real `<video>` rather than parsing the container. The alternative means
+   * a demuxer, and the browser already has one built in - the only cost is that the
+   * file has to be read before it is sent, which for a clip is a second.
+   *
+   * Zero on anything unexpected. Not an error and not a guess: the server treats
+   * zero as "not reported", so a clip the browser could not measure still uploads
+   * and lands in the feed, rather than the whole upload failing over a number.
+   */
+  async function measureDuration(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      // No `src` assignment racing: the promise settles on whichever of loadedmetadata
+      // and error arrives, and `preload='metadata'` is enough for the header.
+      const milliseconds = await new Promise((resolve) => {
+        let settled = false;
+        const finish = (value) => {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        };
+        video.addEventListener('loadedmetadata', () => {
+          const seconds = video.duration;
+          // `Infinity` is what a container with no duration header reports, which a
+          // live recording or a badly muxed file can. Not a long video.
+          finish(Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds * 1000) : 0);
+        }, { once: true });
+        video.addEventListener('error', () => finish(0), { once: true });
+        // A file the browser cannot decode at all would otherwise leave the promise
+        // pending for ever, and the upload would never be attempted.
+        setTimeout(() => finish(0), 8000);
+        video.src = url;
+      });
+      return Math.min(Math.max(0, milliseconds || 0), 60 * 60 * 1000);
+    } catch {
+      return 0;
+    } finally {
+      // Released here rather than left to the garbage collector: an object URL
+      // whose file is still in memory pins the whole video, and a reader picking
+      // several clips would hold all of them.
+      URL.revokeObjectURL(url);
     }
   }
 

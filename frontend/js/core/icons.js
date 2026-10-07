@@ -25,6 +25,10 @@ const PATHS = {
   // A ring, for "record a circle". The dot inside is what distinguishes it from
   // the microphone button beside it at the same size.
   circle: 'M8 14.2A6.2 6.2 0 108 1.8a6.2 6.2 0 000 12.4zM8 6.4a1.6 1.6 0 100 3.2 1.6 1.6 0 000-3.2z',
+  // A strip of frames: the video library. Distinct from `play` at 18px, which is
+  // the clip feed's icon - the two sections sit side by side in the desktop rail
+  // and one triangle each would be unreadable.
+  film: 'M1.8 3.4h12.4v9.2H1.8zM1.8 6h1.8M1.8 10h1.8M12.4 6h1.8M12.4 10h1.8',
   volume: 'M7.4 3.2L4 6H2.2v4H4l3.4 2.8zM10 6.2a2.4 2.4 0 010 3.6M11.9 4.2a5 5 0 010 7.6',
   volumeOff: 'M7.4 3.2L4 6H2.2v4H4l3.4 2.8zM10.2 6.6l3.4 2.8M13.6 6.6l-3.4 2.8',
   eye: 'M1.6 8s2.4-4.2 6.4-4.2S14.4 8 14.4 8 12 12.2 8 12.2 1.6 8 1.6 8zM8 9.8a1.8 1.8 0 100-3.6 1.8 1.8 0 000 3.6z',

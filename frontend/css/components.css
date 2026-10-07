@@ -1601,6 +1601,25 @@
 }
 .composer-mic:hover { background: var(--bg-sunken); color: var(--text); }
 .composer-mic.is-active { background: var(--dusk-100); color: var(--ink-900); }
+
+/* Recording is unavailable - usually because the site is served over plain HTTP,
+   where the browser will not expose a microphone at all. Marked rather than
+   removed: a reader who cannot find the button cannot tell whether the feature is
+   missing or merely switched off, and a greyed button with the reason beside it is
+   the answer. Not `disabled`, because a disabled control is silently skipped by
+   keyboard focus, so the reason would be unreachable that way too. */
+.composer-mic.is-blocked {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.composer-mic.is-blocked:active { animation: none; }
+.composer-mic-note {
+  max-width: 96px;
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
+}
 .composer-mic.is-recording {
   background: var(--danger-soft);
   color: var(--danger);

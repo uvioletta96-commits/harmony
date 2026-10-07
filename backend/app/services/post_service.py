@@ -11,6 +11,7 @@ from sqlalchemy import Select, and_, func, or_, select, update
 from ..extensions import db
 from ..models.base import utcnow
 from ..models.post import (
+    SHORT_CLIP_MAX_MS,
     Comment,
     Post,
     PostMedia,
@@ -216,12 +217,29 @@ def get_video_feed(
 
     # Subquery rather than a join: a join would multiply one post into a row per
     # attached attachment and every count in the response would be wrong.
-    wanted = "video/%" if kind == "video" else "image/%" if kind == "photo" else "%"
-    has_media = (
-        select(PostMedia.id)
-        .where(PostMedia.post_id == Post.id, PostMedia.mime_type.like(wanted))
-        .exists()
-    )
+    #
+    # For clips the subquery is also what keeps long videos out. A clip is something
+    # you watch standing up; a four-minute video is something you came for, and
+    # putting one in a vertical feed means the reader cannot swipe past it. So the
+    # query asks for a clip *and not a long one* - the exclusion lives here rather
+    # than in the client, where hiding it would still cost the bytes.
+    if kind == "video":
+        has_media = (
+            select(PostMedia.id)
+            .where(
+                PostMedia.post_id == Post.id,
+                PostMedia.mime_type.like("video/%"),
+                PostMedia.duration_ms <= SHORT_CLIP_MAX_MS,
+            )
+            .exists()
+        )
+    else:
+        wanted = "image/%" if kind == "photo" else "%"
+        has_media = (
+            select(PostMedia.id)
+            .where(PostMedia.post_id == Post.id, PostMedia.mime_type.like(wanted))
+            .exists()
+        )
 
     query = visible_posts_query(viewer).where(has_media).options(*_post_options())
     page = keyset_page(
@@ -242,7 +260,14 @@ def get_video_feed(
         item["views_count"] = int(item.get("views_count") or 0) + buffered.get(f"views:{item['id']}", 0)
         attachments = item.get("media", [])
         if kind == "video":
-            pool = [a for a in attachments if str(a.get("mime_type", "")).startswith("video/")]
+            # The same rule as the query above, applied to what is chosen for the
+            # screen. Without it a photo-then-clip post whose clip is long would
+            # still put the clip on the screen the query admitted it for.
+            pool = [
+                a for a in attachments
+                if str(a.get("mime_type", "")).startswith("video/")
+                and int(a.get("duration_ms") or 0) <= SHORT_CLIP_MAX_MS
+            ]
         elif kind == "photo":
             pool = [a for a in attachments if str(a.get("mime_type", "")).startswith("image/")]
         else:
@@ -264,6 +289,130 @@ def get_video_feed(
         item["media_count"] = len(attachments)
 
     return Page(items=items, next_cursor=page.next_cursor, has_more=page.has_more)
+
+
+#: What the video library can be sorted or filtered by.
+VIDEO_LIBRARY_SORTS = ("recent", "views", "longest")
+
+
+def get_video_library(
+    viewer: User | None,
+    *,
+    cursor: str | None = None,
+    limit: int | None = None,
+    sort: str = "recent",
+    author: str | None = None,
+) -> Page:
+    """The video library: every video longer than a short clip, newest or by views.
+
+    The counterpart to :func:`get_video_feed`, and deliberately a different shape.
+    The vertical feed is one clip per screen and hides everything else about the
+    post; a library is a grid, so it needs the post's text, its author, its view
+    count and the video's length, and it needs several at once to compare.
+
+    The split is the whole design and it is one number:
+
+      - under :data:`SHORT_CLIP_MAX_MS`, a video belongs to the vertical feed, where
+        it is the only thing on the screen and the reader is swiping;
+      - over it, the video belongs here, where it sits beside its neighbours with
+        its title and length visible, and a reader arrives looking for it.
+
+    Both rules are applied in the query rather than filtered afterwards. Pagination
+    is keyset, so filtering a page after the fact means a page of ten where three
+    are eligible - the reader scrolls and gets nothing, and the next page is
+    silently short.
+
+    ``sort='views'`` orders on a counter that is only flushed nightly, so a video
+    published today reads as having zero views and drops below older ones. Adding
+    the buffered views to the *ordering* would mean a Redis read per candidate row
+    before pagination, which is the wrong shape for a keyset scan; instead creation
+    time breaks the tie, so among videos nobody has watched the newest comes first,
+    which is the sensible answer and never leaves the page empty.
+    """
+    page_size = clamp_page_size(limit, default=int(current_app.config.get("VIDEO_LIBRARY_PAGE_SIZE", 24)))
+
+    if sort not in VIDEO_LIBRARY_SORTS:
+        raise ValidationError("Неизвестная сортировка.", code="invalid_video_sort")
+
+    has_long_video = (
+        select(PostMedia.id)
+        .where(
+            PostMedia.post_id == Post.id,
+            PostMedia.mime_type.like("video/%"),
+            PostMedia.duration_ms > SHORT_CLIP_MAX_MS,
+        )
+        .exists()
+    )
+
+    query = visible_posts_query(viewer).where(has_long_video)
+
+    if author:
+        owner = _author_by_username(query, author)
+        if owner is None:
+            raise NotFoundError("Профиль не найден.", code="profile_not_found")
+        query = query.where(Post.author_id == owner.id)
+
+    # Keyset paging needs an order it can resume from, and the cursor encodes the
+    # order's own columns - so every sort here has to be a column, which rules out
+    # ordering by a computed value. `longest` orders on the media column, which means
+    # a join rather than a subquery, and the join is safe here because it is only
+    # used to order: `distinct` keeps one row per post.
+    order_fields = ("created_at", "id")
+    if sort == "views":
+        query = query.order_by(Post.views_count.desc(), Post.created_at.desc(), Post.id.desc())
+        order_fields = ("views_count", "created_at", "id")
+    elif sort == "longest":
+        longest = (
+            select(PostMedia.duration_ms)
+            .where(PostMedia.post_id == Post.id, PostMedia.mime_type.like("video/%"))
+            .order_by(PostMedia.duration_ms.desc())
+            .limit(1)
+            .correlate(Post)
+            .scalar_subquery()
+        )
+        query = query.order_by(longest.desc(), Post.created_at.desc(), Post.id.desc())
+        # The cursor cannot express a scalar subquery, so the page still pages on
+        # creation time. Two videos published in the same second and ordered by
+        # length may appear out of order across a page boundary - a visible
+        # imperfection in "longest" and not in correctness.
+        order_fields = ("created_at", "id")
+    else:
+        query = query.order_by(Post.created_at.desc(), Post.id.desc())
+
+    query = query.options(*_post_options())
+    page = keyset_page(
+        query, model=Post, page_size=page_size, cursor=cursor, descending=True, order_fields=order_fields
+    )
+
+    items = serialise_posts(page.items, viewer)
+
+    from .cache_service import counters_read
+
+    buffered = counters_read([f"views:{item['id']}" for item in items])
+    for item in items:
+        item["views_count"] = int(item.get("views_count") or 0) + buffered.get(f"views:{item['id']}", 0)
+        long_videos = [
+            a for a in item.get("media", [])
+            if str(a.get("mime_type", "")).startswith("video/")
+            and int(a.get("duration_ms") or 0) > SHORT_CLIP_MAX_MS
+        ]
+        # Longest first: in a grid the card is what the reader compares, and the
+        # longest video on the post is the one worth opening.
+        item["media"] = sorted(long_videos, key=lambda a: int(a.get("duration_ms") or 0), reverse=True)[:1]
+        item["media_count"] = len(item.get("media", []))
+
+    return Page(items=items, next_cursor=page.next_cursor, has_more=page.has_more)
+
+
+def _author_by_username(query: Select, username: str) -> User | None:
+    """The author whose videos to list, or None.
+
+    Found without disturbing `query`: the caller adds its own condition, so this
+    only resolves the username and leaves the filter to the caller.
+    """
+    from ..models.user import User as _User
+
+    return db.session.scalar(select(_User).where(_User.username == username))
 
 
 def _position_of(attachment: dict[str, Any]) -> int:
@@ -698,12 +847,15 @@ def public_counts() -> dict[str, int]:
 
 __all__ = [
     "FEED_MODES",
+    "VIDEO_LIBRARY_SORTS",
     "claim_media",
     "create_post",
     "delete_post",
     "get_feed",
     "get_post",
     "get_user_posts",
+    "get_video_feed",
+    "get_video_library",
     "liked_post_ids",
     "list_reactions",
     "public_counts",

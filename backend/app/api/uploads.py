@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from typing import Any
 
 from flask import Blueprint, current_app, g, request
 
@@ -23,6 +24,20 @@ from ..utils.responses import ValidationError, created
 
 bp = Blueprint("uploads", __name__)
 logger = get_logger("harmony.api.uploads")
+
+
+def _as_milliseconds(value: Any) -> int:
+    """A client-reported duration, bounded.
+
+    Non-numeric is zero rather than an error: this is a field nobody sees, and
+    refusing the whole upload over it would mean a video that plays perfectly is
+    rejected because of a value attached to it.
+    """
+    try:
+        millis = int(float(value))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(millis, 60 * 60 * 1000))
 
 MAX_FILES_PER_REQUEST = 4
 
@@ -52,14 +67,36 @@ def upload_image():
         raise ValidationError(f"За один раз можно загрузить не более {max_per_request} файлов.", code="too_many_files")
 
     alt_text = (request.form.get("alt_text") or (inline or {}).get("alt_text") or "").strip()[:240]
+    # How long each clip runs, reported by the client.
+    #
+    # A JSON body carries a list, because one request can carry several files; a
+    # multipart body carries a parallel list as comma-separated values, since
+    # Werkzeug cannot give two fields the same name reliably and index suffixes would
+    # make the client the thing that has to be right. Either way the position is what
+    # matters, and a request with no lengths at all stores zero - "not reported",
+    # which puts the clip in the short feed rather than failing the upload.
+    raw_durations = request.form.get("durations")
+    if raw_durations is None:
+        reported = (inline or {}).get("durations") or []
+    else:
+        reported = [part for part in raw_durations.split(",") if part.strip()]
+    durations = [_as_milliseconds(value) for value in reported]
 
     # The rows are kept in step with the stored files as they are created.
     # Re-querying them afterwards and zipping by storage_key would silently
     # pair the wrong file with the wrong row whenever two uploads collide.
     stored: list[StoredImage] = []
     rows: list[PostMedia] = []
-    for payload, _filename in files:
-        media = upload_service.store_media(payload, user_id=g.current_user.id)
+    for index, (payload, _filename) in enumerate(files):
+        # Positionally, so a request carrying three clips with three lengths pairs
+        # them in order. A short list leaves the later files at zero rather than
+        # repeating the last figure - repeating it would give every one of them the
+        # same feed.
+        media = upload_service.store_media(
+            payload,
+            user_id=g.current_user.id,
+            duration_ms=durations[index] if index < len(durations) else 0,
+        )
         row = PostMedia(
             owner_id=g.current_user.id,
             post_id=None,
@@ -71,6 +108,7 @@ def upload_image():
             height=media.height,
             byte_size=media.byte_size,
             mime_type=media.mime_type,
+            duration_ms=media.duration_ms,
             alt_text=alt_text or None,
             content_hash=media.content_hash,
             is_processed=True,

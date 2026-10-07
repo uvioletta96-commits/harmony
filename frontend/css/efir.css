@@ -1,0 +1,280 @@
+/* --------------------------------------------------------------------------
+   «Эфир» - the video library.
+
+   The counterpart to videos.css, and the reason it exists as a separate file:
+   the two sections share almost no layout. The vertical feed is one fixed screen
+   per item with no list; this is a grid of cards that scrolls. Rules shared
+   between them would be rules that fit neither.
+
+   Kept to the site's existing language - warm neutrals, thin dividers, the same
+   type - so the library reads as part of the same place rather than a different
+   site embedded in it.
+   -------------------------------------------------------------------------- */
+
+.efir-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-8);
+}
+
+.efir-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.efir-title {
+  font-size: var(--text-2xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.efir-sub {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+/* Back to the clip feed, and the only way out of this page on a phone - the
+   bottom bar is the other way, but a reader who arrived from a link has no
+   bottom bar expectation yet. */
+.efir-back { flex-shrink: 0; }
+
+.efir-sorts {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.efir-sorts::-webkit-scrollbar { display: none; }
+.efir-sort {
+  position: relative;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+.efir-sort:hover { color: var(--text-secondary); }
+.efir-sort.is-active { color: var(--text); }
+.efir-sort.is-active::after {
+  content: '';
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: -1px;
+  height: 2px;
+  background: var(--text);
+  border-radius: 1px;
+}
+
+/* Grid ---------------------------------------------------------------------- */
+
+/* `auto-fill` with a floor rather than a fixed column count: the library is a
+   grid of things to compare, and the number on screen follows the width. At 360px
+   this is one column, which is what a single card needs to be legible. */
+.efir-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-4);
+}
+
+.efir-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.efir-thumb {
+  position: relative;
+  /* 16:9 held exactly, whatever the card's width works out to. Without it the
+     cards in a row have different heights and the grid reads as ragged. */
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-sunken);
+}
+.efir-thumb-img {
+  width: 100%;
+  height: 100%;
+  /* `cover`, because this is a poster and not the thing itself - the whole point
+     of a card is to be looked at, and a letterboxed strip of a portrait video
+     would be mostly black. The full video is one tap away. */
+  object-fit: cover;
+  display: block;
+}
+
+.efir-length {
+  position: absolute;
+  right: var(--space-2);
+  bottom: var(--space-2);
+  padding: 1px 5px;
+  border-radius: var(--radius-xs);
+  background: rgb(0 0 0 / 0.78);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+
+.efir-play-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgb(0 0 0 / 0.28);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.efir-card:hover .efir-play-hint { opacity: 1; }
+
+/* The button covers the picture rather than sitting inside it as a small target.
+   A 40px icon in the corner of a thumbnail is a hard tap on a phone, and the
+   whole card is the obvious thing to touch. */
+.efir-open {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0;
+  color: transparent;
+}
+
+.efir-card-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.efir-card-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.efir-card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  min-width: 0;
+}
+.efir-card-author {
+  color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.efir-dot { flex-shrink: 0; color: var(--text-faint); }
+
+.efir-sentinel { grid-column: 1 / -1; height: 1px; }
+.efir-status {
+  padding: var(--space-4) 0;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  min-height: 1px;
+}
+
+/* Player -------------------------------------------------------------------- */
+
+.efir-player {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: rgb(0 0 0 / 0.92);
+}
+.efir-player-frame {
+  width: min(100%, 1100px);
+  aspect-ratio: 16 / 9;
+  max-height: 78vh;
+  background: #000;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.efir-player-video {
+  width: 100%;
+  height: 100%;
+  /* `contain`, unlike the feed's `cover`. This is the video itself rather than a
+     card for it, so nothing may be cropped: a missing third of somebody's face is
+     not a fair trade for filling the frame. */
+  object-fit: contain;
+  background: #000;
+}
+.efir-player-info {
+  width: min(100%, 1100px);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.efir-player-title {
+  font-size: var(--text-base);
+  font-weight: 500;
+  line-height: 1.4;
+  max-height: 4.2em;
+  overflow-y: auto;
+}
+.efir-player-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: rgb(255 255 255 / 0.72);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.efir-player-meta a { color: inherit; }
+.efir-player-meta a:hover { color: #fff; }
+/* The avatar has a light ring of its own; against black it reads as a box. */
+.efir-player-meta .avatar { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.2); }
+
+.efir-player-close {
+  position: absolute;
+  top: calc(var(--space-3) + env(safe-area-inset-top, 0px));
+  right: var(--space-3);
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: rgb(255 255 255 / 0.12);
+  color: #fff;
+  cursor: pointer;
+}
+.efir-player-close:hover { background: rgb(255 255 255 / 0.22); }
+
+@media (max-width: 560px) {
+  .efir-page { padding: var(--space-4) var(--space-3) var(--space-8); }
+  .efir-grid {
+    /* One column below 560px. Two columns of a 260px floor at 360px would be 172px
+       each once the gaps are counted - too narrow for a title and an author line,
+       and the grid stops being comparable, which is the only reason for it. */
+    grid-template-columns: 1fr;
+  }
+  .efir-player-frame { max-height: 62vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .efir-play-hint { transition: none; }
+  .efir-sort { transition: none; }
+}

@@ -58,9 +58,38 @@ function preferredMimeType() {
   return '';
 }
 
+/** Why recording is unavailable, or null when it is available. */
+export function recordBlocker() {
+  if (typeof MediaRecorder === 'undefined') {
+    return t('Браузер не умеет записывать голосовые');
+  }
+  // The rule that actually bites in practice, and the reason the button appeared to
+  // be broken rather than locked.
+  //
+  // `navigator.mediaDevices` is only exposed in a *secure context*. The site is
+  // served over plain HTTP on an IP address, so the whole object is `undefined` -
+  // not the method, the object. Measured on the deployed site:
+  //
+  //     isSecureContext                false
+  //     typeof navigator.mediaDevices  "undefined"
+  //     typeof MediaRecorder           "function"
+  //
+  // So the encoder exists and the microphone does not, and "does your browser
+  // support recording" is the wrong question to put to the reader. No amount of
+  // feature detection finds a way around it: this is a browser security rule, and
+  // the only fix is HTTPS.
+  if (!window.isSecureContext) {
+    return t('Голосовые работают только по HTTPS — сейчас сайт открыт без него');
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return t('Браузер не умеет записывать голосовые');
+  }
+  return null;
+}
+
 /** Whether this browser can record at all. */
 export function canRecord() {
-  return typeof MediaRecorder !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
+  return recordBlocker() === null;
 }
 
 /**
@@ -132,8 +161,13 @@ function durationOf(elapsedMs) {
  * because a recording is worthless until it is attached to a message.
  */
 export async function startRecording({ onLevel, onTick } = {}) {
-  if (!canRecord()) {
-    throw new Error(t('Браузер не умеет записывать голос'));
+  const blocked = recordBlocker();
+  if (blocked) {
+    // Thrown with the reason attached so the composer can show the real one instead
+    // of flattening every cause into "your browser cannot do this".
+    const error = new Error(blocked);
+    error.blocked = true;
+    throw error;
   }
 
   const stream = await navigator.mediaDevices.getUserMedia({

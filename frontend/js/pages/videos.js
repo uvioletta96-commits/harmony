@@ -102,7 +102,7 @@ export async function render() {
     id: 'videos-scroller',
     tabindex: '0',
     role: 'feed',
-    'aria-label': t('Видео и фото'),
+    'aria-label': t('Клипы'),
   });
 
   // Chrome visibility, remembered across the session rather than per page: a
@@ -144,8 +144,19 @@ export async function render() {
 
   const shell = el('section', { class: 'videos-page', dataset: { chrome: chromeVisible ? 'on' : 'off' } },
     el('header', { class: 'videos-head' },
-      el('h1', { class: 'videos-title', text: t('Видео и фото') }),
+      el('h1', { class: 'videos-title', text: t('Клипы') }),
       el('div', { class: 'videos-head-actions' },
+        // The way to the long form, from inside the short form. Placed beside the
+        // fullscreen button rather than in the bottom bar because the bottom bar is
+        // hidden in immersive mode, and this is the one navigation the reader needs
+        // while watching.
+        el('button', {
+          class: 'videos-icon-button',
+          type: 'button',
+          title: t('Длинные ролики — Эфир'),
+          'aria-label': t('Длинные ролики — Эфир'),
+          onClick: () => router.navigate('/efir'),
+        }, icon('film', { size: 18 })),
         fullscreenButton,
         chromeToggle,
         el('button', {
@@ -533,7 +544,97 @@ export async function render() {
   await loadMore();
   syncPlaybackToScroll();
 
+  armAutoFullscreen();
+
   return shell;
+}
+
+/**
+ * Go fullscreen on arrival, the way a short-video feed does.
+ *
+ * What "fullscreen" means here, and why it is two things:
+ *
+ * 1. Hiding the site's own header, tabs and bottom bar. This needs no permission
+ *    and always works, so it happens immediately and unconditionally. It is what
+ *    the reader actually sees as "на весь экран" on the phone in the screenshot -
+ *    their browser's own bars are already at the top and bottom, and the site's
+ *    chrome was the part in the middle eating a fifth of the height.
+ *
+ * 2. The browser's real fullscreen. This requires a user gesture, so it cannot
+ *    happen on load - a synthetic call is refused by every engine. The reader's
+ *    first tap, scroll or key press supplies the gesture instead, and that moment
+ *    is also when they have shown they want to watch rather than browse. Armed on
+ *    a one-shot listener that removes itself the instant it fires, so the second
+ *    tap is not swallowed by it and never fights the double-tap gesture.
+ *
+ * Remembered, not repeated: a reader who left fullscreen once is not put straight
+ * back into it on every visit, which is what makes a browser-level mode that the
+ * user cannot easily re-enter feel hostile.
+ */
+function armAutoFullscreen() {
+  const IMMERSIVE_KEY = 'videosImmersive';
+  const wantsImmersive = store.get(IMMERSIVE_KEY) !== false;
+
+  const setImmersive = (on) => {
+    document.body.classList.toggle('is-immersive', on);
+    store.set(IMMERSIVE_KEY, on);
+  };
+
+  // (1) immediately, and reversible: the explicit exit button turns it off.
+  setImmersive(wantsImmersive);
+
+  if (!wantsImmersive) return;
+
+  let armed = true;
+  const disarm = () => {
+    if (!armed) return;
+    armed = false;
+    for (const name of ['touchstart', 'pointerdown', 'keydown', 'wheel']) {
+      document.removeEventListener(name, fire, { capture: true });
+    }
+    window.removeEventListener('scroll', fire, { capture: true, passive: true });
+  };
+
+  // `scroll` does not count: a reader can arrive with the wheel already turning
+  // over a restored scroll position, and that is not a gesture.
+  function fire(event) {
+    if (event.type === 'keydown' && event.metaKey) return; // cmd+f and friends
+    disarm();
+    enterBrowserFullscreen();
+  }
+
+  for (const name of ['touchstart', 'pointerdown', 'keydown', 'wheel']) {
+    document.addEventListener(name, fire, { capture: true, passive: true });
+  }
+  window.addEventListener('scroll', fire, { capture: true, passive: true });
+
+  teardown.push(disarm);
+}
+
+/**
+ * Ask for the browser's own fullscreen, swallowing refusal.
+ *
+ * Silent on failure on purpose: the site's chrome is already hidden by the time
+ * this runs, so a refusal costs the reader nothing visible, and a toast saying
+ * "не разрешил" on arrival would be noise about something they did not ask for.
+ */
+function enterBrowserFullscreen() {
+  const target = document.querySelector('.is-current video')
+    || document.getElementById('videos-scroller');
+  if (!target) return;
+
+  try {
+    if (document.fullscreenElement || document.webkitFullscreenElement) return;
+    if (target.requestFullscreen) {
+      // No options object: `navigationUI` is rejected outright by some engines,
+      // which throws and costs the whole feature.
+      Promise.resolve(target.requestFullscreen()).catch(() => {});
+    } else if (target.webkitRequestFullscreen) {
+      target.webkitRequestFullscreen();
+    }
+  } catch {
+    /* refused; the site's own chrome is already hidden */
+  }
 }
 
 /** The heart that rises and fades where a double tap landed. */
@@ -560,6 +661,9 @@ export function unmount() {
     }
   }
   teardown = [];
+  // The immersive class belongs to `body`, which outlives the page. Left behind,
+  // every other route would render with its own chrome hidden and no way back.
+  document.body.classList.remove('is-immersive');
   stopPlayback();
   current = null;
 }

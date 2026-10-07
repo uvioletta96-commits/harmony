@@ -22,6 +22,7 @@ import * as profilePage from './pages/profile.js';
 import * as postPage from './pages/post.js';
 import * as searchPage from './pages/search.js';
 import * as videosPage from './pages/videos.js';
+import * as efirPage from './pages/efir.js';
 import * as chatPage from './pages/chat.js';
 import * as settingsPage from './pages/settings.js';
 import * as adminPage from './pages/admin.js';
@@ -31,7 +32,11 @@ import * as notFoundPage from './pages/notfound.js';
 
 const PUBLIC_ROUTES = [
   '/', '/login', '/register', '/forgot', '/reset-password', '/verify',
-  '/search', '/videos', '/terms', '/privacy',
+  // `/efir` is here for the same reason as `/videos`: a link somebody sent you to
+  // a video should work when you are not signed in. It was missing once already for
+  // `/videos`, and every signed-out visitor was redirected to the login page for a
+  // page that existed and worked.
+  '/search', '/videos', '/efir', '/terms', '/privacy',
 ];
 
 function isPublic(path) {
@@ -51,6 +56,7 @@ router.define('/u/:username', profilePage.render);
 router.define('/post/:id', postPage.render);
 router.define('/search', searchPage.render);
 router.define('/videos', videosPage.render);
+router.define('/efir', efirPage.render);
 router.define('/chat', chatPage.render);
 router.define('/chat/:id', chatPage.render);
 router.define('/notifications', notificationsPage.render);

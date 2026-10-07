@@ -106,6 +106,10 @@ class StoredMedia:
     byte_size: int
     mime_type: str
     content_hash: str
+    #: Zero for images, and for videos whose client did not report a length. Carried
+    #: here rather than inferred later so the value that was measured is the value
+    #: that is stored.
+    duration_ms: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -117,6 +121,7 @@ class StoredMedia:
             "byte_size": self.byte_size,
             "mime_type": self.mime_type,
             "content_hash": self.content_hash,
+            "duration_ms": self.duration_ms,
         }
 
 
@@ -351,6 +356,7 @@ def store_video(
     *,
     user_id: int,
     alt_text: str | None = None,
+    duration_ms: int = 0,
 ) -> StoredMedia:
     """Validate and persist one uploaded video.
 
@@ -358,9 +364,12 @@ def store_video(
     shipping ffmpeg and accepting a transcode queue, which is a different
     product with different failure modes; here the goal is to accept a file the
     browser can already play, verify that it really is one, and get it out of
-    the upload directory. Dimensions and thumbnails stay empty rather than being
-    guessed at - nothing downstream requires them to be truthful, because
-    nothing downstream reads them.
+    the upload directory.
+
+    Width and height stay empty rather than being guessed at: nothing downstream
+    requires them to be truthful. Duration is different - it decides which of two
+    feeds the video appears in, so it is recorded rather than left blank. It comes
+    from the client, which knows it exactly while the file is still in the browser.
     """
     if not data:
         raise ValidationError("Файл пуст.", code="empty_upload")
@@ -380,7 +389,11 @@ def store_video(
     storage_key = build_storage_key(user_id, mime_type, content_hash)
     _write(storage_key, data)
 
-    log_event(logger, "INFO", "upload.video_stored", user_id=user_id, mime_type=mime_type, byte_size=len(data))
+    seconds = _clamp_duration_ms(duration_ms)
+    log_event(
+        logger, "INFO", "upload.video_stored",
+        user_id=user_id, mime_type=mime_type, byte_size=len(data), duration_ms=seconds,
+    )
     return StoredMedia(
         storage_key=storage_key,
         url=public_url(storage_key),
@@ -390,7 +403,23 @@ def store_video(
         byte_size=len(data),
         mime_type=mime_type,
         content_hash=content_hash,
+        duration_ms=seconds,
     )
+
+
+def _clamp_duration_ms(value: Any) -> int:
+    """Milliseconds, bounded and non-negative.
+
+    The ceiling is generous - an hour - because the point is to stop a nonsense
+    figure from choosing which feed a video lands in, not to police the number. A
+    non-numeric value is zero, which reads as "not reported" and puts the clip in
+    the short feed rather than raising over a field the reader cannot see.
+    """
+    try:
+        millis = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(millis, 60 * 60 * 1000))
 
 
 def store_audio(
@@ -490,6 +519,8 @@ def store_chat_media(data: bytes, *, user_id: int, kind: str = "image") -> Store
     if sniffed.startswith("audio/"):
         media = store_audio(data, user_id=user_id)
     elif sniffed.startswith("video/"):
+        # No duration: a clip in a chat bubble is never the long form, and the
+        # value would be overwritten by the voice player's own figure anyway.
         media = store_video(data, user_id=user_id)
     else:
         media = store_image(data, user_id=user_id)
@@ -528,6 +559,7 @@ def store_media(
     user_id: int,
     alt_text: str | None = None,
     make_thumbnail: bool = True,
+    duration_ms: int = 0,
 ) -> StoredMedia:
     """Persist an upload, dispatching on what the bytes actually are.
 
@@ -535,9 +567,13 @@ def store_media(
     client's Content-Type, so a ``.png`` that is really an MP4 is stored as
     video - which is what it is - instead of failing an image decoder and
     reporting a confusing error.
+
+    `duration_ms` is passed through only on the video branch. Handing it to the
+    image path would store a duration for a photograph, which then makes a still
+    look like a clip in anything that groups by it.
     """
     if sniff_video_mime(data):
-        return store_video(data, user_id=user_id, alt_text=alt_text)
+        return store_video(data, user_id=user_id, alt_text=alt_text, duration_ms=duration_ms)
     return store_image(data, user_id=user_id, alt_text=alt_text, make_thumbnail=make_thumbnail)
 
 

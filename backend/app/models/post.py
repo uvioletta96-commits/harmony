@@ -29,6 +29,19 @@ from .base import (
 )
 from .user import User
 
+#: Where the line between a short clip and a hosted video sits: three minutes.
+#:
+#: Defined here rather than read from config because it is part of what a media row
+#: *means*, not a tuning knob - the same number decides what the vertical feed shows
+#: and what the video library lists, and a model whose `to_dict` depends on app
+#: config is a model that cannot be serialised outside a request.
+#:
+#: Three minutes is where the two forms genuinely differ rather than where a round
+#: number sits. Under it, a clip is watched standing up and its author is the point.
+#: Over it, the video is the point and the author is in the corner - which is a
+#: different interface, not a longer version of the same one.
+SHORT_CLIP_MAX_MS = 3 * 60 * 1000
+
 
 class PostVisibility(str, Enum):
     PUBLIC = "public"
@@ -182,6 +195,16 @@ class PostMedia(PrimaryKeyMixin, TimestampMixin, db.Model):
     height: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     mime_type: Mapped[str] = mapped_column(String(64), nullable=False, default="image/jpeg")
+    #: How long a video runs, in milliseconds. Reported by the client, which knows
+    #: it while the file is still in the browser.
+    #:
+    #: This is what separates a short clip from a hosted video, and it is stored
+    #: rather than recomputed because the server cannot decode a container without
+    #: ffmpeg - which is not on this machine. Zero means "not reported", and a post
+    #: with a zero-length clip is treated as short, so a client that omits the field
+    #: lands in the feed that always exists rather than in one keyed on a number
+    #: nobody supplied.
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     alt_text: Mapped[str | None] = mapped_column(String(240), nullable=True)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     is_processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
@@ -190,6 +213,7 @@ class PostMedia(PrimaryKeyMixin, TimestampMixin, db.Model):
     post = relationship("Post", back_populates="media")
 
     def to_dict(self) -> dict[str, Any]:
+        is_video = self.mime_type.startswith("video/")
         return {
             "id": str(self.id),
             "url": self.url,
@@ -198,6 +222,12 @@ class PostMedia(PrimaryKeyMixin, TimestampMixin, db.Model):
             "height": self.height,
             "byte_size": self.byte_size,
             "mime_type": self.mime_type,
+            "duration_ms": self.duration_ms,
+            # The client's own reading of the length, resolved against the configured
+            # cut-off. A clip is something you watch standing up; a hosted video is
+            # something you came for. Sent with the attachment so the card in the
+            # video library can draw the badge without a second request.
+            "is_short_clip": is_video and self.duration_ms <= SHORT_CLIP_MAX_MS,
             "alt_text": self.alt_text,
         }
 
@@ -307,6 +337,7 @@ def published_posts_query():  # type: ignore[no-untyped-def]
 
 
 __all__ = [
+    "SHORT_CLIP_MAX_MS",
     "Comment",
     "Post",
     "PostMedia",

@@ -18,9 +18,9 @@ import realtime from '../core/realtime.js';
 import { relativeTime, smartDate, initialsOf, colourFor, dayLabel } from '../core/format.js';
 import { avatar, button, emptyState, errorState, loadingRow, iconButton, openLightbox, setLoading } from '../components/ui.js';
 import {
-  canRecord,
   messageAttachments,
   pickAndUpload,
+  recordBlocker,
   startRecording,
   uploadRecording,
 } from '../components/chatMedia.js';
@@ -413,6 +413,15 @@ function buildComposer(context) {
   let recording = null;
   let circleMode = false;
 
+  // Why recording is unavailable, or null when it is available.
+  //
+  // Asked once, at build time, rather than on every press. The reason does not
+  // change while the page is open - `isSecureContext` is fixed for the life of the
+  // document - and knowing it up front lets the button *look* unavailable instead of
+  // looking broken. A button that accepts a tap and then says no is exactly what
+  // "кнопка не нажимается" describes.
+  const blocked = recordBlocker();
+
   const recordButton = el('button', {
     class: 'composer-mic',
     type: 'button',
@@ -437,14 +446,36 @@ function buildComposer(context) {
     recordButton.setAttribute('aria-label', circleMode ? t('Записать кружок') : t('Записать голосовое сообщение'));
   });
 
+  // The mode toggle works whether or not recording does. It only chooses which of
+  // the two things the mic button will produce, so there is nothing about it that
+  // needs a microphone - and disabling it would mean the reader cannot even see
+  // that the two modes exist.
+  if (blocked) {
+    for (const button of [recordButton, circleButton]) {
+      button.classList.add('is-blocked');
+      button.setAttribute('aria-disabled', 'true');
+      button.title = blocked;
+    }
+    // Said on the button, not only when pressed: the reason is a property of the
+    // site, not of the moment, and a reader who cannot press it cannot be told why
+    // by pressing it.
+    recordButton.insertAdjacentElement(
+      'beforebegin',
+      el('span', { class: 'composer-mic-note', title: blocked, text: blocked }),
+    );
+  }
+
   const meter = el('span', { class: 'composer-meter', 'aria-hidden': 'true' },
     el('span', { class: 'composer-meter-fill' }));
   const timerLabel = recordButton.querySelector('.composer-mic-time');
 
   const beginRecording = async () => {
     if (recording) return;
-    if (!canRecord()) {
-      toast.error(t('Браузер не умеет записывать голос'));
+    if (blocked) {
+      // The real reason, not a guess. On this deployment it is HTTPS, which no
+      // amount of browser support will fix, and telling a reader their browser
+      // cannot do something sends them looking for a setting that is not there.
+      toast.error(blocked);
       return;
     }
     try {
