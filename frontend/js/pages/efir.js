@@ -190,7 +190,7 @@ export async function render({ author = null } = {}) {
     status.textContent = exhausted && library.size ? t('Это все ролики') : '';
     renderShelves(shelfRow, shelf);
 
-    const matched = filterByQuery([...library.values()]);
+    const matched = filterByQuery([...library.values()], query);
     const chosen = shelf === 'all' ? matched : shelfItems(shelf, matched);
 
     grid.replaceChildren();
@@ -222,16 +222,23 @@ export async function render({ author = null } = {}) {
   return shell;
 }
 
-/** Case- and width-insensitive match over the title, author and handle. */
-function filterByQuery(items) {
-  if (!query) return items;
-  const needle = query.toLocaleLowerCase();
+/**
+ * Case-insensitive match over the title, the author's name and their handle.
+ *
+ * `needle` is a parameter, not a closure read. The first version read a `query`
+ * belonging to `render`'s scope, which a module-level function cannot see - so the
+ * very first render threw `query is not defined` and the library showed an error
+ * card with no videos at all.
+ */
+function filterByQuery(items, needle) {
+  if (!needle) return items;
+  const wanted = needle.toLocaleLowerCase();
   return items.filter((item) => {
     const author = item.author || {};
     return (
-      (item.body || '').toLocaleLowerCase().includes(needle)
-      || (author.display_name || '').toLocaleLowerCase().includes(needle)
-      || (author.username || '').toLocaleLowerCase().includes(needle)
+      (item.body || '').toLocaleLowerCase().includes(wanted)
+      || (author.display_name || '').toLocaleLowerCase().includes(wanted)
+      || (author.username || '').toLocaleLowerCase().includes(wanted)
     );
   });
 }

@@ -454,12 +454,65 @@ class TestSearch:
 
     def test_it_matches_the_author_as_well_as_the_title(self):
         """The two things a reader remembers about a video."""
-        matcher = code(block(EFIR, "function filterByQuery(items)"))
+        matcher = code(block(EFIR, "function filterByQuery(items, needle)"))
         assert "body" in matcher
         assert "username" in matcher
         assert "toLocaleLowerCase" in matcher, (
             "the search is case-sensitive, so it misses the word a reader was "
             "thinking of"
+        )
+
+    def test_the_search_term_is_a_parameter_not_a_closure_read(self):
+        """The bug this catches is worth the check on its own.
+
+        `filterByQuery` was a module-level function reading a `query` that belonged
+        to `render`'s scope. A module-level function cannot see that, so the first
+        render threw `ReferenceError: query is not defined` and the library showed
+        an error card with no videos in it - which is how it reached production: the
+        section looked alive, because the shelves, the sorts and the search field all
+        rendered, and only the grid was broken.
+
+        ESLint would catch this; there is no linter for the unbundled ES modules
+        here. So it is checked by reading the signature.
+        """
+        signature = re.search(r"function filterByQuery\(([^)]*)\)", EFIR)
+        assert signature, "no filterByQuery"
+        assert "needle" in signature.group(1) or "query" in signature.group(1), (
+            "filterByQuery takes no search term, so it must be reading one from an "
+            "enclosing scope - which a module-level function does not have"
+        )
+        matcher = code(block(EFIR, "function filterByQuery(items, needle)"))
+        assert re.search(r"if \(!needle\)", matcher), (
+            "the filter does not short-circuit on an empty term, so every video is "
+            "re-tested against an undefined one"
+        )
+
+    def test_the_caller_passes_the_term(self):
+        """Counted by paren depth, not by matching to the next `)`.
+
+        The argument is `[...library.values()]`, so a pattern that stops at the first
+        closing bracket sees `filterByQuery([...library.values()` and reports a
+        missing second argument on correct code - which is how a check like this
+        teaches its reader to ignore it.
+        """
+        render = code(block(EFIR, "  function render()"))
+        # Skip *past* the call's own `(`, which `depth = 1` already accounts for.
+        # Leaving the cursor on it counted the opening bracket twice, so the walk
+        # never returned to depth 0 and never reached a depth-1 comma.
+        call = render.index("filterByQuery(") + len("filterByQuery(")
+        depth = 1
+        commas = 0
+        for char in render[call:]:
+            if char in "([":
+                depth += 1
+            elif char in ")]":
+                depth -= 1
+                if depth == 0:
+                    break
+            elif char == "," and depth == 1:
+                commas += 1
+        assert commas >= 1, (
+            "the caller does not pass the search term, so the filter cannot see it"
         )
 
     def test_no_results_says_so_and_says_which_search(self):
